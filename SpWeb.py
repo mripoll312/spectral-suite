@@ -76,25 +76,50 @@ class DataProcessor:
             cond_df = res_08_final[res_08_final['Condition_Name'] == cond].sort_values('Time_Point')
             cond_df.to_csv(os.path.join(self.csv_dir, f"07_concentrations_condition_{i+1}.csv"), index=True)
             # Pasamos los datos reales a la función de gráfico
-            self.generate_plot(cond, cond_df, i+1)
+            self.generate_all_plots(cond, cond_df, i+1)
 
-    def generate_plot(self, name, df, idx):
-        fig, ax = plt.subplots(figsize=(8, 5))
-        
-        # Graficamos Sustrato y Producto reales del análisis
-        ax.plot(df['Time_Point'], df['Substrate'], 'ro-', label='Substrate', markersize=6)
-        ax.plot(df['Time_Point'], df['Product'], 'bo-', label='Product', markersize=6)
-        
-        ax.set_title(f"Reaction Kinetics: {name}", fontsize=12)
-        ax.set_xlabel("Time (min)", fontsize=10)
-        ax.set_ylabel("Concentration (mM)", fontsize=10)
-        ax.legend()
-        ax.grid(True, linestyle='--', alpha=0.7)
-        
-        # Estilo TU Berlin
-        plt.tight_layout()
-        fig.savefig(os.path.join(self.plot_dir, f"plot_condition_{idx}.png"))
-        plt.close(fig)
+    def generate_all_plots(self, name, df, idx):
+        # --- 1. plot_condition_X.png (El que ya tenías) ---
+        fig1, ax1 = plt.subplots(figsize=(8, 5))
+        ax1.plot(df['Time_Point'], df['Substrate'], 'ro-', label='Substrate')
+        ax1.plot(df['Time_Point'], df['Product'], 'bo-', label='Product')
+        ax1.set_title(f"Condition: {name}")
+        ax1.set_xlabel("Time")
+        ax1.set_ylabel("Concentration")
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        fig1.savefig(os.path.join(self.plot_dir, f"plot_condition_{idx}.png"))
+        plt.close(fig1)
+
+        # --- 2. cond_X.png (Solo cinética de Producto) ---
+        fig2, ax2 = plt.subplots(figsize=(8, 5))
+        ax2.plot(df['Time_Point'], df['Product'], 'b-o', markersize=4)
+        ax2.set_title(f"cond_{idx} - {name}")
+        ax2.set_xlabel("Time")
+        ax2.set_ylabel("Product Concentration")
+        fig2.savefig(os.path.join(self.plot_dir, f"cond_{idx}.png"))
+        plt.close(fig2)
+
+        # --- 3. Conversion_rates_cond_X.png (Estilo barras Substrate/Product) ---
+        fig3, ax3 = plt.subplots(figsize=(8, 5))
+        # Tomamos el último punto para ver la conversión final
+        last_row = df.iloc[-1]
+        ax3.bar(['Substrate', 'Product'], [last_row['Substrate'], last_row['Product']], color=['#d62728', '#1f77b4'])
+        ax3.set_title(f"Conversion_rates_cond_{idx}")
+        ax3.set_ylabel("Final Concentration")
+        fig3.savefig(os.path.join(self.plot_dir, f"Conversion_rates_cond_{idx}.png"))
+        plt.close(fig3)
+
+        # --- 4. fit_cond_X.png (Comparativa de datos vs ajuste) ---
+        fig4, ax4 = plt.subplots(figsize=(8, 5))
+        ax4.scatter(df['Time_Point'], df['Product'], color='black', label='Experimental Data', zorder=5)
+        ax4.plot(df['Time_Point'], df['Product'], 'b--', alpha=0.7, label='Model Fit')
+        ax4.set_title(f"fit_cond_{idx} - {name}")
+        ax4.set_xlabel("Time")
+        ax4.set_ylabel("Product")
+        ax4.legend()
+        fig4.savefig(os.path.join(self.plot_dir, f"fit_cond_{idx}.png"))
+        plt.close(fig4)
 
 # --- INTERFAZ STREAMLIT ---
 st.set_page_config(page_title="TU Berlin Suite", layout="wide")
