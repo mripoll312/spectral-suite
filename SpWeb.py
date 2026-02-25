@@ -123,7 +123,7 @@ class DataProcessor:
 
 # --- CONFIGURACIÓN DE PÁGINA (ESTILO AGGIORNADO) ---
 st.set_page_config(
-    page_title="TU Berlin | Spectral Analysis Toolbox",
+    page_title="Spectral Analysis Toolbox",
     page_icon="🧪",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -203,7 +203,7 @@ with st.sidebar:
     # Logo de ORT con diseño minimalista
     st.markdown("""
         <div style="text-align: center; padding: 15px; background: white; border-radius: 12px; margin: 0 10px; border: 1px solid #edf2f7;">
-            <img src="https://es.pngtree.com/freepng/bacteria-illustration_17164212.html" width="90">
+            <img src="https://png.pngtree.com/png-clipart/20241117/original/pngtree-bacteria-illustration-png-image_17164212.png" width="90">
         </div>
     """, unsafe_allow_html=True)
     
