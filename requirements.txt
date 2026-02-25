@@ -6,3 +6,4 @@ matplotlib
 fpdf
 openpyxl
 configargparse
+lmfit
