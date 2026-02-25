@@ -121,85 +121,199 @@ class DataProcessor:
         fig4.savefig(os.path.join(self.plot_dir, f"fit_cond_{idx}.png"))
         plt.close(fig4)
 
-# --- INTERFAZ STREAMLIT ---
-st.set_page_config(page_title="TU Berlin Suite", layout="wide")
-st.title("🧪 TU Berlin Data Toolbox Web")
+# --- CONFIGURACIÓN DE PÁGINA (ESTILO AGGIORNADO) ---
+st.set_page_config(
+    page_title="TU Berlin | Spectral Analysis Toolbox",
+    page_icon="🧪",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-tab1, tab2 = st.tabs(["🔄 1. Convertidor", "📊 2. Data Toolbox"])
+st.markdown("""
+    <style>
+    /* 1. Contenedor del Header (No fijo para evitar que desaparezca) */
+    .custom-header {
+        background-color: #ffffff;
+        padding: 20px;
+        border-bottom: 2px solid #f0f2f6;
+        margin-bottom: 20px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 15px;
+        width: 100%;
+    }
+    
+    .custom-header h2 {
+        margin: 0 !important;
+        font-size: 1.6rem !important;
+        color: #2c3e50 !important;
+        font-weight: 700;
+        text-align: center;
+    }
 
-# --- PESTAÑA 1: LÓGICA EXACTA DE espectroConvert.py ---
+    /* 2. Ajuste del Sidebar (Color Pastel Suave) */
+    [data-testid="stSidebar"] {
+        background-color: #f8fafc; /* Azul/Gris pastel muy suave */
+        border-right: 1px solid #e2e8f0;
+    }
+    
+    [data-testid="stSidebar"] .stMarkdown, 
+    [data-testid="stSidebar"] p {
+        color: #475569 !important;
+    }
+
+    /* Reducción de espacio superior de Streamlit */
+    .block-container {
+        padding-top: 1rem !important;
+    }
+    
+    /* Estilo de los tabs para nivel PhD */
+    .stTabs [data-baseweb="tab-list"] {
+        border-bottom: 1px solid #e2e8f0;
+    }
+
+    /* Refinamiento de botones para que sean más finos */
+    div.stButton > button, div[data-testid="stDownloadButton"] > button {
+        height: 2.2rem !important;
+        padding-top: 0px !important;
+        padding-bottom: 0px !important;
+        line-height: 2.2rem !important;
+        font-size: 0.9rem !important;
+        border-radius: 8px !important;
+    }
+
+    /* Alineación vertical de la fila de cabecera en Tab 2 */
+    [data-testid="stHorizontalBlock"] {
+        align-items: center;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+st.markdown("""
+    <div class="custom-header">
+        <span style="font-size: 2rem;">🧪</span>
+        <h2>Spectral Analysis & Biotransformation Toolbox</h2>
+    </div>
+    """, unsafe_allow_html=True)
+
+# --- SIDEBAR ---
+with st.sidebar:
+    st.markdown("<br>", unsafe_allow_html=True)
+    # Logo de ORT con diseño minimalista
+    st.markdown("""
+        <div style="text-align: center; padding: 15px; background: white; border-radius: 12px; margin: 0 10px; border: 1px solid #edf2f7;">
+            <img src="https://logoteca.uy/wp-content/uploads/sites/3/2024/09/ORT-Branding-Logo-Principal-1920x1317.png" width="90">
+        </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("<h4 style='text-align: center; color: #64748b; margin-top: 15px;'>Workstation Control</h4>", unsafe_allow_html=True)
+    st.info("🧬 **PhD Engine v2.1.4**\n\nOptimized for kinetic regression.")
+    
+
+
+tab1, tab2 = st.tabs(["🔄 **1. Converter (Magellan)**", "📊 **2. Data Engine**"])
+
+# --- PESTAÑA 1: CONVERTIDOR ---
 with tab1:
-    st.header("🔬 Convertidor de Espectros (Formato Matriz 96)")
-    uploaded_file = st.file_uploader("Cargar archivo Excel/CSV de Magellan", type=["xlsx", "csv"], key="magellan_input")
+    with st.container():
+        st.subheader("Matrix-to-TSV Transformation")
+        st.write("Cargue los archivos de salida de Magellan para normalizarlos al formato estándar de 96 pocillos.")
+        
+        uploaded_file = st.file_uploader("Upload Magellan Output (Excel/CSV)", type=["xlsx", "csv"], key="mag_up")
+        
+        if uploaded_file:
+            try:
+                # Lógica exacta de espectroConvert.py
+                df_orig = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
+                df_orig = df_orig.set_index(df_orig.columns[0])
+                df_t = df_orig.T
+                df_t.index = df_t.index.str.replace('nm', '', case=False).astype(int)
+                
+                filas = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
+                todas = [f"{f}{c}" for f in filas for c in range(1, 13)]
+                df_final = pd.DataFrame(index=df_t.index, columns=todas)
+                for col in todas:
+                    df_final[col] = df_t[col] if col in df_t.columns else ""
+                
+                df_export = df_final.reset_index().rename(columns={'index': 'Wavelength'})
+                
+                c1, c2 = st.columns([2, 1])
+                with c1:
+                    st.success("File processed successfully.")
+                    st.dataframe(df_export.head(10), use_container_width=True)
+                with c2:
+                    st.write("### Actions")
+                    output = io.StringIO()
+                    df_export.to_csv(output, sep='\t', index=False, na_rep="")
+                    st.download_button(
+                        label="📥 Download .tsv Spectrum",
+                        data=output.getvalue(),
+                        file_name=f"{uploaded_file.name.split('.')[0]}_Spectrum.tsv",
+                        mime="text/tab-separated-values"
+                    )
+            except Exception as e:
+                st.error(f"Scientific Error: {e}")
 
-    if uploaded_file is not None:
-        try:
-            if uploaded_file.name.endswith('.csv'):
-                df_orig = pd.read_csv(uploaded_file)
-            else:
-                df_orig = pd.read_excel(uploaded_file)
-
-            df_orig = df_orig.set_index(df_orig.columns[0])
-            df_transposed = df_orig.T
-            df_transposed.index = df_transposed.index.str.replace('nm', '', case=False).astype(int)
-            df_transposed.index.name = 'Wavelength'
-
-            filas = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
-            columnas_pocillo = range(1, 13)
-            todas_las_muestras = [f"{f}{c}" for f in filas for c in columnas_pocillo]
-
-            df_final = pd.DataFrame(index=df_transposed.index, columns=todas_las_muestras)
-
-            for col in todas_las_muestras:
-                if col in df_transposed.columns:
-                    df_final[col] = df_transposed[col]
-                else:
-                    df_final[col] = ""
-
-            df_export = df_final.reset_index()
-
-            st.subheader("Vista previa del formato exacto (96 pocillos)")
-            st.dataframe(df_export.head(10))
-
-            output = io.StringIO()
-            df_export.to_csv(output, sep='\t', index=False, na_rep="")
-            tsv_data = output.getvalue()
-
-            btn_name = uploaded_file.name.split('.')[0] + "_Spectrum.tsv"
-            st.download_button(
-                label="💾 Descargar TSV Formato Exacto",
-                data=tsv_data,
-                file_name=btn_name,
-                mime="text/tab-separated-values"
-            )
-        except Exception as e:
-            st.error(f"Error en el procesamiento: {e}")
-
-# --- PESTAÑA 2: ANALISIS ---
+# --- PESTAÑA 2: DATA TOOLBOX ---
 with tab2:
-    st.header("Motor de Análisis de Anaconda")
-    c1, c2 = st.columns(2)
-    with c1: m_file = st.file_uploader("Metadata (CSV)", type="csv", key="metadata_input")
-    with c2: s_files = st.file_uploader("Espectros (.tsv)", type="tsv", accept_multiple_files=True, key="spectra_input")
+    # Usamos 3 columnas para que los botones no se estiren a lo ancho
+    col_title, col_run, col_dl = st.columns([1.5, 1, 1])
+    
+    with col_title:
+        st.markdown("<h3 style='margin:0;'>Kinetic Analysis</h3>", unsafe_allow_html=True)
+    
+    with col_run:
+        # Botón de ejecución
+        run_btn = st.button("🚀 RUN ANALYSIS", use_container_width=True)
+    
+    with col_dl:
+        # Botón de descarga (solo si está listo)
+        if 'zip_ready' in st.session_state:
+            st.download_button(
+                label="📥 DOWNLOAD ZIP",
+                data=st.session_state['zip_ready'],
+                file_name="Biotrans_Report_PhD.zip",
+                use_container_width=True,
+            )
+        else:
+            st.write("") # Mantiene el alineado si no hay botón
 
-    if m_file and s_files:
-        df_m = pd.read_csv(m_file)
-        if st.button("🚀 EJECUTAR DATA TOOLBOX"):
-            with tempfile.TemporaryDirectory() as tmpdir:
-                specs = {f.name: f.getvalue() for f in s_files}
-                engine = DataProcessor(df_m, specs, tmpdir)
-                engine.run_original_logic()
-                
-                buf = io.BytesIO()
-                with zipfile.ZipFile(buf, "w") as zf:
-                    for folder in ["csv_files", "plots"]:
-                        curr_path = os.path.join(tmpdir, folder)
-                        if os.path.exists(curr_path):
-                            for f in os.listdir(curr_path):
-                                zf.write(os.path.join(curr_path, f), os.path.join(folder, f))
-                
-                st.session_state['zip'] = buf.getvalue()
-                st.success("Proceso completo.")
+    st.markdown("---")
 
-        if 'zip' in st.session_state:
-            st.download_button("📥 DESCARGAR RESULTADOS (.ZIP)", st.session_state['zip'], "Resultados.zip")
+    # Sección de carga de archivos (usamos expanders para ahorrar espacio vertical)
+    upload_expander = st.expander("📂 1 & 2. Data Input (Metadata & Spectra)", expanded=True)
+    
+    with upload_expander:
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.markdown("#### Metadata Mapping")
+            m_file = st.file_uploader("Upload CSV", type="csv", label_visibility="collapsed")
+        with col_b:
+            st.markdown("#### Spectral Data")
+            s_files = st.file_uploader("Upload TSV Files", type="tsv", accept_multiple_files=True, label_visibility="collapsed")
+
+    # Lógica de procesamiento (Vinculada al botón superior)
+    if run_btn:
+        if m_file and s_files:
+            with st.spinner("Executing Mathematical Fit..."):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    df_m = pd.read_csv(m_file)
+                    specs = {f.name: f.getvalue() for f in s_files}
+                    
+                    engine = DataProcessor(df_m, specs, tmpdir)
+                    engine.run_original_logic()
+                    
+                    # Generar ZIP
+                    buf = io.BytesIO()
+                    with zipfile.ZipFile(buf, "w") as zf:
+                        for folder in ["csv_files", "plots"]:
+                            p = os.path.join(tmpdir, folder)
+                            if os.path.exists(p):
+                                for f in os.listdir(p):
+                                    zf.write(os.path.join(p, f), os.path.join(folder, f))
+                    
+                    st.session_state['zip_ready'] = buf.getvalue()
+                    st.rerun() # Recarga para que el botón de descarga aparezca arriba inmediatamente
+        else:
+            st.warning("Please upload both Metadata and Spectral files before running.")
