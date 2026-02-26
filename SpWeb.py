@@ -9,11 +9,11 @@ import io
 import matplotlib.pyplot as plt
 
 # --- 1. CONFIGURACIÓN ---
-st.set_page_config(page_title="Spectral Suite - Full Fix", layout="wide")
+st.set_page_config(page_title="Spectral Suite - TSV & ZIP Fix", layout="wide")
 import matplotlib
 matplotlib.use('Agg') 
 
-# --- 2. PARCHES (Cruciales para Streamlit Cloud) ---
+# --- 2. PARCHES ---
 if not hasattr(pd.DataFrame, 'append'):
     pd.DataFrame.append = lambda self, other, ignore_index=True: pd.concat([self, other], ignore_index=ignore_index)
 
@@ -23,12 +23,9 @@ def patched_new(name, data=b'', **kwargs):
     return original_new(name, data, **kwargs)
 hashlib.new = patched_new
 
-if 'file_cache' not in st.session_state:
-    st.session_state.file_cache = {}
-
 def force_metadata_compatibility(dt_instance):
     df = dt_instance._meta_data
-    # Unificar nombres de columnas para motor y para gráficas
+    # Unificar nombres de columnas
     time_col = next((c for c in ['Time_Point', 'Time_Points', 'time_point'] if c in df.columns), None)
     if time_col:
         df['Time_Point'] = df[time_col]
@@ -38,7 +35,7 @@ def force_metadata_compatibility(dt_instance):
     if cond_col:
         df['Condition_Name'] = df[cond_col]
 
-    # FIX CRÍTICO: Limpiar nombres de archivos en la metadata
+    # EL TRUCO: Limpiar rutas locales para que el motor busque el archivo en la carpeta actual
     for col in df.columns:
         df[col] = df[col].apply(lambda x: os.path.basename(str(x)).strip() if isinstance(x, str) and (('.tsv' in x) or ('.csv' in x)) else x)
     dt_instance._meta_data = df
@@ -46,10 +43,10 @@ def force_metadata_compatibility(dt_instance):
 from data_toolbox import Data
 
 # --- 3. INTERFAZ ---
-tab1, tab2 = st.tabs(["🔄 Conversor", "📊 Análisis y Gráficos"])
+tab1, tab2 = st.tabs(["🔄 Conversor", "📊 Análisis y Descarga"])
 
 with tab1:
-    st.header("🔄 Convertidor")
+    st.header("🔄 Convertidor Magellan")
     uploaded_xlsx = st.file_uploader("Subir archivo Magellan (.xlsx)", type=["xlsx"])
     if uploaded_xlsx:
         df_mag = pd.read_excel(uploaded_xlsx)
@@ -64,61 +61,69 @@ with tab2:
     with col2: ref_files = st.file_uploader("2. Muestras (.tsv)", type=["tsv"], accept_multiple_files=True)
     with col3: data_files = st.file_uploader("3. Estándares (.csv)", type=["csv"], accept_multiple_files=True)
 
-    if st.button("🚀 Iniciar Análisis y Generar Reporte"):
+    if st.button("🚀 Iniciar Análisis Completo"):
         if meta_file and ref_files and data_files:
-            tmp_dir = os.path.abspath("workspace")
-            if os.path.exists(tmp_dir): shutil.rmtree(tmp_dir)
+            # 1. Preparar rutas absolutas
+            base_path = os.path.abspath("workspace")
+            if os.path.exists(base_path): shutil.rmtree(base_path)
             
-            # Crear estructura de carpetas
-            graphs_dir = os.path.join(tmp_dir, "graphs")
-            os.makedirs(os.path.join(tmp_dir, "csv_files"), exist_ok=True)
+            graphs_dir = os.path.join(base_path, "graphs")
+            csv_dir = os.path.join(base_path, "csv_files")
             os.makedirs(graphs_dir, exist_ok=True)
+            os.makedirs(csv_dir, exist_ok=True)
 
-            # Guardar archivos físicamente
-            with open(os.path.join(tmp_dir, "metadata.csv"), "wb") as f:
-                f.write(meta_file.getvalue())
+            # 2. TRUCO DE CARGA: Escribir archivos físicos reseteando punteros
+            # Metadata
+            meta_path = os.path.join(base_path, "metadata.csv")
+            with open(meta_path, "wb") as f:
+                f.write(meta_file.getbuffer()) # getbuffer es más seguro para archivos binarios
             
+            # Muestras y Estándares (TSV/CSV)
             for f in ref_files + data_files:
                 fname = os.path.basename(f.name).strip()
-                with open(os.path.join(tmp_dir, fname), "wb") as out:
-                    out.write(f.getvalue())
+                target_path = os.path.join(base_path, fname)
+                with open(target_path, "wb") as out:
+                    out.write(f.getbuffer())
 
             try:
-                with st.spinner("Calculando y generando gráficos..."):
+                with st.spinner("Procesando..."):
                     old_cwd = os.getcwd()
-                    os.chdir(tmp_dir)
+                    os.chdir(base_path) # Entrar al workspace
                     
                     sys.argv = ["data_toolbox.py", "-m", "metadata.csv"]
                     dt = Data()
                     dt.parse_args()
                     force_metadata_compatibility(dt)
                     
+                    # Ejecutar motor
                     dt.read_data(); dt.sub_background(); dt.rearrange_data(); dt.group_data(); dt.conversion_rate()
                     
                     meta_map = dt._meta_data.set_index('Unique_Sample_ID')[['Condition_Name', 'Time_Points']].to_dict('index')
-                    os.chdir(old_cwd)
+                    os.chdir(old_cwd) # Volver al origen para graficar
 
                 # --- BLOQUE 1: RATES ---
                 st.subheader("📉 Tasas de Conversión (Rates)")
-                csv_rates = os.path.join(tmp_dir, "csv_files", "08_conv_rates.csv")
-                if os.path.exists(csv_rates):
-                    df_r = pd.read_csv(csv_rates)
+                
+                actual_csv_rates = os.path.join(csv_dir, "08_conv_rates.csv")
+                if os.path.exists(actual_csv_rates):
+                    df_r = pd.read_csv(actual_csv_rates)
                     for cond in df_r.iloc[:, 0].unique():
                         df_cond = df_r[df_r.iloc[:, 0] == cond].sort_values(df_r.columns[1])
                         fig, ax = plt.subplots(figsize=(8, 4))
-                        ax.plot(df_cond.iloc[:,1], df_cond.iloc[:,2], 'o-', label='Sustrato', color='#1f77b4')
-                        ax.plot(df_cond.iloc[:,1], df_cond.iloc[:,3], 's-', label='Producto', color='#ff7f0e')
+                        ax.plot(df_cond.iloc[:,1], df_cond.iloc[:,2], 'o-', label='Substrate')
+                        ax.plot(df_cond.iloc[:,1], df_cond.iloc[:,3], 's-', label='Product')
                         ax.set_title(f"Rates: {cond}")
-                        ax.set_xlabel("Tiempo (min)"); ax.legend(); ax.grid(True, alpha=0.3)
+                        ax.legend(); ax.grid(True, alpha=0.3)
                         
-                        # GUARDAR IMAGEN EN LA CARPETA PARA EL ZIP
-                        fig.savefig(os.path.join(graphs_dir, f"rates_{cond}.png"), bbox_inches='tight')
+                        # GUARDADO PARA EL ZIP
+                        fig.savefig(os.path.join(graphs_dir, f"rates_{cond}.png"))
                         st.pyplot(fig)
                         plt.close(fig)
 
                 # --- BLOQUE 2: ESPECTROS MRP ---
-                st.subheader("📊 Espectros Agrupados")
-                master_csv = os.path.join(tmp_dir, "csv_files", "00b_df_complete_background_subtracted_and_dropped.csv")
+                st.subheader("📊 Espectros por Condición")
+                
+                master_csv = os.path.join(csv_dir, "00b_df_complete_background_subtracted_and_dropped.csv")
                 if os.path.exists(master_csv):
                     df_master = pd.read_csv(master_csv)
                     wavelengths = df_master.iloc[:, 0]
@@ -133,22 +138,22 @@ with tab2:
 
                     for cond_name, curves in sorted(grouped.items()):
                         fig, ax = plt.subplots(figsize=(10, 6))
-                        # Ordenar curvas por tiempo
                         for t_val, col_name in sorted(curves, key=lambda x: x[0]):
                             ax.plot(wavelengths, df_master[col_name], label=f"{t_val} min")
-                        ax.set_title(f"Espectros: {cond_name}"); ax.set_xlabel("Wavelength (nm)"); ax.legend(title="Tiempo")
+                        ax.set_title(f"Espectros: {cond_name}"); ax.legend(title="Tiempo")
                         
-                        # GUARDAR IMAGEN EN LA CARPETA PARA EL ZIP
-                        fig.savefig(os.path.join(graphs_dir, f"espectro_{cond_name}.png"), bbox_inches='tight')
+                        # GUARDADO PARA EL ZIP
+                        fig.savefig(os.path.join(graphs_dir, f"espectro_{cond_name}.png"))
                         st.pyplot(fig)
                         plt.close(fig)
 
-                # FINAL: Crear ZIP con TODO (CSV y Gráficos)
-                shutil.make_archive("analisis_spectral_suite", 'zip', tmp_dir)
-                st.success("✅ ¡Reporte completo generado!")
-                with open("analisis_spectral_suite.zip", "rb") as f:
-                    st.download_button("⬇️ Descargar ZIP con CSVs y Gráficos", f, "analisis_completo.zip")
+                # GENERAR ZIP FINAL
+                shutil.make_archive("resultado_total", 'zip', base_path)
+                st.success("✅ ¡Análisis y gráficas generadas!")
+                with open("resultado_total.zip", "rb") as f:
+                    st.download_button("⬇️ Descargar Todo (CSVs + Gráficos)", f, "analisis_final.zip")
 
             except Exception as e:
-                st.error(f"Error: {e}"); st.code(traceback.format_exc())
+                st.error(f"Error: {e}")
+                st.code(traceback.format_exc())
                 if 'old_cwd' in locals(): os.chdir(old_cwd)
