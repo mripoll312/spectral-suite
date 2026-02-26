@@ -8,12 +8,16 @@ import traceback
 import io
 import matplotlib.pyplot as plt
 
-# --- 1. CONFIGURACIÓN ---
-st.set_page_config(page_title="Spectral Suite - TSV & ZIP Fix", layout="wide")
+# --- 1. CONFIGURACIÓN E INICIALIZACIÓN ---
+st.set_page_config(page_title="Spectral Suite - Fix Final", layout="wide")
 import matplotlib
 matplotlib.use('Agg') 
 
-# --- 2. PARCHES ---
+# INICIALIZACIÓN CRÍTICA: Esto debe ir antes de cualquier parche
+if 'file_cache' not in st.session_state:
+    st.session_state.file_cache = {}
+
+# --- 2. PARCHES DE COMPATIBILIDAD ---
 if not hasattr(pd.DataFrame, 'append'):
     pd.DataFrame.append = lambda self, other, ignore_index=True: pd.concat([self, other], ignore_index=ignore_index)
 
@@ -23,9 +27,19 @@ def patched_new(name, data=b'', **kwargs):
     return original_new(name, data, **kwargs)
 hashlib.new = patched_new
 
+# Parche corregido con validación de existencia
+from pandas.io.parsers.readers import read_csv as _original_pandas_read_func
+def patched_read_csv(filepath_or_buffer, *args, **kwargs):
+    if isinstance(filepath_or_buffer, str):
+        requested_name = os.path.basename(filepath_or_buffer).strip()
+        # Verificamos si la caché existe y si el archivo está en ella
+        if 'file_cache' in st.session_state and requested_name in st.session_state.file_cache:
+            return _original_pandas_read_func(io.BytesIO(st.session_state.file_cache[requested_name]), *args, **kwargs)
+    return _original_pandas_read_func(filepath_or_buffer, *args, **kwargs)
+pd.read_csv = patched_read_csv
+
 def force_metadata_compatibility(dt_instance):
     df = dt_instance._meta_data
-    # Unificar nombres de columnas
     time_col = next((c for c in ['Time_Point', 'Time_Points', 'time_point'] if c in df.columns), None)
     if time_col:
         df['Time_Point'] = df[time_col]
@@ -35,7 +49,6 @@ def force_metadata_compatibility(dt_instance):
     if cond_col:
         df['Condition_Name'] = df[cond_col]
 
-    # EL TRUCO: Limpiar rutas locales para que el motor busque el archivo en la carpeta actual
     for col in df.columns:
         df[col] = df[col].apply(lambda x: os.path.basename(str(x)).strip() if isinstance(x, str) and (('.tsv' in x) or ('.csv' in x)) else x)
     dt_instance._meta_data = df
@@ -43,7 +56,7 @@ def force_metadata_compatibility(dt_instance):
 from data_toolbox import Data
 
 # --- 3. INTERFAZ ---
-tab1, tab2 = st.tabs(["🔄 Conversor", "📊 Análisis y Descarga"])
+tab1, tab2 = st.tabs(["🔄 Conversor", "📊 Análisis y Reporte"])
 
 with tab1:
     st.header("🔄 Convertidor Magellan")
@@ -63,7 +76,6 @@ with tab2:
 
     if st.button("🚀 Iniciar Análisis Completo"):
         if meta_file and ref_files and data_files:
-            # 1. Preparar rutas absolutas
             base_path = os.path.abspath("workspace")
             if os.path.exists(base_path): shutil.rmtree(base_path)
             
@@ -72,56 +84,56 @@ with tab2:
             os.makedirs(graphs_dir, exist_ok=True)
             os.makedirs(csv_dir, exist_ok=True)
 
-            # 2. TRUCO DE CARGA: Escribir archivos físicos reseteando punteros
-            # Metadata
-            meta_path = os.path.join(base_path, "metadata.csv")
-            with open(meta_path, "wb") as f:
-                f.write(meta_file.getbuffer()) # getbuffer es más seguro para archivos binarios
+            # TRUCO TSV: Guardar en caché de sesión y en disco físico
+            st.session_state.file_cache = {}
             
-            # Muestras y Estándares (TSV/CSV)
+            # Guardar Metadata
+            meta_content = meta_file.getvalue()
+            st.session_state.file_cache['metadata.csv'] = meta_content
+            with open(os.path.join(base_path, "metadata.csv"), "wb") as f:
+                f.write(meta_content)
+            
+            # Guardar Muestras y Estándares
             for f in ref_files + data_files:
                 fname = os.path.basename(f.name).strip()
-                target_path = os.path.join(base_path, fname)
-                with open(target_path, "wb") as out:
-                    out.write(f.getbuffer())
+                fcontent = f.getvalue()
+                st.session_state.file_cache[fname] = fcontent
+                with open(os.path.join(base_path, fname), "wb") as out:
+                    out.write(fcontent)
 
             try:
-                with st.spinner("Procesando..."):
+                with st.spinner("Procesando datos..."):
                     old_cwd = os.getcwd()
-                    os.chdir(base_path) # Entrar al workspace
+                    os.chdir(base_path)
                     
                     sys.argv = ["data_toolbox.py", "-m", "metadata.csv"]
                     dt = Data()
                     dt.parse_args()
                     force_metadata_compatibility(dt)
                     
-                    # Ejecutar motor
                     dt.read_data(); dt.sub_background(); dt.rearrange_data(); dt.group_data(); dt.conversion_rate()
                     
                     meta_map = dt._meta_data.set_index('Unique_Sample_ID')[['Condition_Name', 'Time_Points']].to_dict('index')
-                    os.chdir(old_cwd) # Volver al origen para graficar
+                    os.chdir(old_cwd)
 
                 # --- BLOQUE 1: RATES ---
-                st.subheader("📉 Tasas de Conversión (Rates)")
+                st.subheader("📉 Tasas de Conversión")
                 
                 actual_csv_rates = os.path.join(csv_dir, "08_conv_rates.csv")
                 if os.path.exists(actual_csv_rates):
                     df_r = pd.read_csv(actual_csv_rates)
                     for cond in df_r.iloc[:, 0].unique():
-                        df_cond = df_r[df_r.iloc[:, 0] == cond].sort_values(df_r.columns[1])
+                        df_cond = df_r[df_r.iloc[:, 0] == cond].sort_values(df_cond.columns[1] if len(df_cond.columns)>1 else df_r.columns[1])
                         fig, ax = plt.subplots(figsize=(8, 4))
                         ax.plot(df_cond.iloc[:,1], df_cond.iloc[:,2], 'o-', label='Substrate')
                         ax.plot(df_cond.iloc[:,1], df_cond.iloc[:,3], 's-', label='Product')
-                        ax.set_title(f"Rates: {cond}")
-                        ax.legend(); ax.grid(True, alpha=0.3)
-                        
-                        # GUARDADO PARA EL ZIP
-                        fig.savefig(os.path.join(graphs_dir, f"rates_{cond}.png"))
+                        ax.set_title(f"Rates: {cond}"); ax.legend(); ax.grid(True, alpha=0.3)
+                        fig.savefig(os.path.join(graphs_dir, f"rates_{cond}.png"), bbox_inches='tight')
                         st.pyplot(fig)
                         plt.close(fig)
 
-                # --- BLOQUE 2: ESPECTROS MRP ---
-                st.subheader("📊 Espectros por Condición")
+                # --- BLOQUE 2: ESPECTROS ---
+                st.subheader("📊 Evolución de Espectros")
                 
                 master_csv = os.path.join(csv_dir, "00b_df_complete_background_subtracted_and_dropped.csv")
                 if os.path.exists(master_csv):
@@ -141,19 +153,15 @@ with tab2:
                         for t_val, col_name in sorted(curves, key=lambda x: x[0]):
                             ax.plot(wavelengths, df_master[col_name], label=f"{t_val} min")
                         ax.set_title(f"Espectros: {cond_name}"); ax.legend(title="Tiempo")
-                        
-                        # GUARDADO PARA EL ZIP
-                        fig.savefig(os.path.join(graphs_dir, f"espectro_{cond_name}.png"))
+                        fig.savefig(os.path.join(graphs_dir, f"espectro_{cond_name}.png"), bbox_inches='tight')
                         st.pyplot(fig)
                         plt.close(fig)
 
-                # GENERAR ZIP FINAL
-                shutil.make_archive("resultado_total", 'zip', base_path)
-                st.success("✅ ¡Análisis y gráficas generadas!")
-                with open("resultado_total.zip", "rb") as f:
-                    st.download_button("⬇️ Descargar Todo (CSVs + Gráficos)", f, "analisis_final.zip")
+                shutil.make_archive("analisis_completo", 'zip', base_path)
+                st.success("✅ ¡Todo listo!")
+                with open("analisis_completo.zip", "rb") as f:
+                    st.download_button("⬇️ Descargar Resultados (ZIP)", f, "analisis_completo.zip")
 
             except Exception as e:
-                st.error(f"Error: {e}")
-                st.code(traceback.format_exc())
+                st.error(f"Error: {e}"); st.code(traceback.format_exc())
                 if 'old_cwd' in locals(): os.chdir(old_cwd)
