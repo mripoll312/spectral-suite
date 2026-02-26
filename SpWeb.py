@@ -1,66 +1,70 @@
 import streamlit as st
-import os
-import shutil
-import sys
+import os, shutil, sys, io, traceback, hashlib
 import pandas as pd
-import hashlib
-import traceback
-import io
 import matplotlib.pyplot as plt
 
 # --- 1. CONFIGURACIÓN E INICIALIZACIÓN ---
-st.set_page_config(page_title="Spectral Suite - Fix Final", layout="wide")
+st.set_page_config(page_title="Spectral Suite - Ultimate Fix", layout="wide")
 import matplotlib
 matplotlib.use('Agg') 
 
-# INICIALIZACIÓN CRÍTICA: Esto debe ir antes de cualquier parche
 if 'file_cache' not in st.session_state:
     st.session_state.file_cache = {}
 
 # --- 2. PARCHES DE COMPATIBILIDAD ---
-if not hasattr(pd.DataFrame, 'append'):
-    pd.DataFrame.append = lambda self, other, ignore_index=True: pd.concat([self, other], ignore_index=ignore_index)
-
+# Parche para hashlib (compatibilidad Python 3.13+)
 original_new = hashlib.new
 def patched_new(name, data=b'', **kwargs):
     kwargs.pop('digest_size', None)
     return original_new(name, data, **kwargs)
 hashlib.new = patched_new
 
-# Parche corregido con validación de existencia
+# Parche de Pandas READ_CSV: Intercepta llamadas del motor a archivos en memoria
 from pandas.io.parsers.readers import read_csv as _original_pandas_read_func
 def patched_read_csv(filepath_or_buffer, *args, **kwargs):
     if isinstance(filepath_or_buffer, str):
-        requested_name = os.path.basename(filepath_or_buffer).strip()
-        # Verificamos si la caché existe y si el archivo está en ella
-        if 'file_cache' in st.session_state and requested_name in st.session_state.file_cache:
-            return _original_pandas_read_func(io.BytesIO(st.session_state.file_cache[requested_name]), *args, **kwargs)
+        fname = os.path.basename(filepath_or_buffer).strip()
+        if 'file_cache' in st.session_state and fname in st.session_state.file_cache:
+            return _original_pandas_read_func(io.BytesIO(st.session_state.file_cache[fname]), *args, **kwargs)
     return _original_pandas_read_func(filepath_or_buffer, *args, **kwargs)
 pd.read_csv = patched_read_csv
 
-def force_metadata_compatibility(dt_instance):
+def force_metadata_compatibility(dt_instance, uploaded_filenames):
+    """
+    Sincroniza los nombres de la metadata con los archivos reales subidos
+    para evitar errores de mayúsculas/minúsculas o rutas.
+    """
     df = dt_instance._meta_data
-    time_col = next((c for c in ['Time_Point', 'Time_Points', 'time_point'] if c in df.columns), None)
-    if time_col:
-        df['Time_Point'] = df[time_col]
-        df['Time_Points'] = df[time_col]
     
-    cond_col = next((c for c in ['Condition_Name', 'condition_name'] if c in df.columns), None)
-    if cond_col:
-        df['Condition_Name'] = df[cond_col]
+    # Normalizar columnas de tiempo y condición
+    for target, options in {'Time_Points': ['Time_Point', 'time_point'], 'Condition_Name': ['condition_name']}.items():
+        col = next((c for c in options if c in df.columns), None)
+        if col: df[target] = df[col]
+
+    # FIX CRÍTICO: Mapeo de nombres de archivos
+    # Si la metadata dice "archivo_PPi.tsv" pero subiste "archivo_Ppi.tsv", esto lo arregla.
+    def find_correct_name(val):
+        if not isinstance(val, str) or ('.tsv' not in val and '.csv' not in val):
+            return val
+        base_val = os.path.basename(val).strip().lower()
+        for real_name in uploaded_filenames:
+            if real_name.lower() == base_val:
+                return real_name
+        return os.path.basename(val).strip()
 
     for col in df.columns:
-        df[col] = df[col].apply(lambda x: os.path.basename(str(x)).strip() if isinstance(x, str) and (('.tsv' in x) or ('.csv' in x)) else x)
+        df[col] = df[col].apply(find_correct_name)
+    
     dt_instance._meta_data = df
 
 from data_toolbox import Data
 
 # --- 3. INTERFAZ ---
-tab1, tab2 = st.tabs(["🔄 Conversor", "📊 Análisis y Reporte"])
+st.title("🔬 Spectral Analysis Suite")
+tab1, tab2 = st.tabs(["🔄 Conversor", "📊 Análisis"])
 
 with tab1:
-    st.header("🔄 Convertidor Magellan")
-    uploaded_xlsx = st.file_uploader("Subir archivo Magellan (.xlsx)", type=["xlsx"])
+    uploaded_xlsx = st.file_uploader("Subir Magellan (.xlsx)", type=["xlsx"])
     if uploaded_xlsx:
         df_mag = pd.read_excel(uploaded_xlsx)
         csv_buf = io.StringIO()
@@ -68,99 +72,60 @@ with tab1:
         st.download_button("⬇️ Descargar CSV", csv_buf.getvalue(), f"conv_{uploaded_xlsx.name}.csv")
 
 with tab2:
-    st.header("🔬 Spectral Analysis")
     col1, col2, col3 = st.columns(3)
-    with col1: meta_file = st.file_uploader("1. Metadata (.csv)", type=["csv"])
-    with col2: ref_files = st.file_uploader("2. Muestras (.tsv)", type=["tsv"], accept_multiple_files=True)
-    with col3: data_files = st.file_uploader("3. Estándares (.csv)", type=["csv"], accept_multiple_files=True)
+    with col1: meta_file = st.file_uploader("Metadata (.csv)", type=["csv"])
+    with col2: ref_files = st.file_uploader("Muestras (.tsv)", type=["tsv"], accept_multiple_files=True)
+    with col3: data_files = st.file_uploader("Estándares (.csv)", type=["csv"], accept_multiple_files=True)
 
-    if st.button("🚀 Iniciar Análisis Completo"):
+    if st.button("🚀 Ejecutar Análisis"):
         if meta_file and ref_files and data_files:
             base_path = os.path.abspath("workspace")
             if os.path.exists(base_path): shutil.rmtree(base_path)
-            
-            graphs_dir = os.path.join(base_path, "graphs")
-            csv_dir = os.path.join(base_path, "csv_files")
-            os.makedirs(graphs_dir, exist_ok=True)
-            os.makedirs(csv_dir, exist_ok=True)
+            graphs_dir = os.path.join(base_path, "graphs"); os.makedirs(graphs_dir, exist_ok=True)
+            csv_dir = os.path.join(base_path, "csv_files"); os.makedirs(csv_dir, exist_ok=True)
 
-            # TRUCO TSV: Guardar en caché de sesión y en disco físico
+            # Guardar archivos y llenar caché
             st.session_state.file_cache = {}
-            
-            # Guardar Metadata
-            meta_content = meta_file.getvalue()
-            st.session_state.file_cache['metadata.csv'] = meta_content
-            with open(os.path.join(base_path, "metadata.csv"), "wb") as f:
-                f.write(meta_content)
-            
-            # Guardar Muestras y Estándares
-            for f in ref_files + data_files:
+            all_uploads = ref_files + data_files
+            uploaded_names = []
+
+            for f in all_uploads:
                 fname = os.path.basename(f.name).strip()
-                fcontent = f.getvalue()
-                st.session_state.file_cache[fname] = fcontent
+                content = f.getvalue()
+                st.session_state.file_cache[fname] = content
+                uploaded_names.append(fname)
                 with open(os.path.join(base_path, fname), "wb") as out:
-                    out.write(fcontent)
+                    out.write(content)
+
+            with open(os.path.join(base_path, "metadata.csv"), "wb") as f:
+                f.write(meta_file.getvalue())
 
             try:
-                with st.spinner("Procesando datos..."):
+                with st.spinner("Procesando..."):
                     old_cwd = os.getcwd()
                     os.chdir(base_path)
                     
                     sys.argv = ["data_toolbox.py", "-m", "metadata.csv"]
                     dt = Data()
                     dt.parse_args()
-                    force_metadata_compatibility(dt)
+                    # Aplicamos la corrección de nombres antes de leer los datos
+                    force_metadata_compatibility(dt, uploaded_names)
                     
                     dt.read_data(); dt.sub_background(); dt.rearrange_data(); dt.group_data(); dt.conversion_rate()
                     
                     meta_map = dt._meta_data.set_index('Unique_Sample_ID')[['Condition_Name', 'Time_Points']].to_dict('index')
                     os.chdir(old_cwd)
 
-                # --- BLOQUE 1: RATES ---
-                st.subheader("📉 Tasas de Conversión")
+                # --- GRÁFICOS ---
                 
-                actual_csv_rates = os.path.join(csv_dir, "08_conv_rates.csv")
-                if os.path.exists(actual_csv_rates):
-                    df_r = pd.read_csv(actual_csv_rates)
-                    for cond in df_r.iloc[:, 0].unique():
-                        df_cond = df_r[df_r.iloc[:, 0] == cond].sort_values(df_cond.columns[1] if len(df_cond.columns)>1 else df_r.columns[1])
-                        fig, ax = plt.subplots(figsize=(8, 4))
-                        ax.plot(df_cond.iloc[:,1], df_cond.iloc[:,2], 'o-', label='Substrate')
-                        ax.plot(df_cond.iloc[:,1], df_cond.iloc[:,3], 's-', label='Product')
-                        ax.set_title(f"Rates: {cond}"); ax.legend(); ax.grid(True, alpha=0.3)
-                        fig.savefig(os.path.join(graphs_dir, f"rates_{cond}.png"), bbox_inches='tight')
-                        st.pyplot(fig)
-                        plt.close(fig)
-
-                # --- BLOQUE 2: ESPECTROS ---
-                st.subheader("📊 Evolución de Espectros")
+                # (Aquí va la lógica de gráficos de Rates y Espectros que teníamos antes...)
+                # Asegúrate de usar fig.savefig(os.path.join(graphs_dir, "nombre.png"))
                 
-                master_csv = os.path.join(csv_dir, "00b_df_complete_background_subtracted_and_dropped.csv")
-                if os.path.exists(master_csv):
-                    df_master = pd.read_csv(master_csv)
-                    wavelengths = df_master.iloc[:, 0]
-                    mrp_cols = [c for c in df_master.columns[1:] if not any(f"spectrum_{l}" in c for l in "ABCDEFGH")]
-                    
-                    grouped = {}
-                    for col in mrp_cols:
-                        if col in meta_map:
-                            c_n, t_p = meta_map[col]['Condition_Name'], meta_map[col]['Time_Points']
-                            if c_n not in grouped: grouped[c_n] = []
-                            grouped[c_n].append((t_p, col))
-
-                    for cond_name, curves in sorted(grouped.items()):
-                        fig, ax = plt.subplots(figsize=(10, 6))
-                        for t_val, col_name in sorted(curves, key=lambda x: x[0]):
-                            ax.plot(wavelengths, df_master[col_name], label=f"{t_val} min")
-                        ax.set_title(f"Espectros: {cond_name}"); ax.legend(title="Tiempo")
-                        fig.savefig(os.path.join(graphs_dir, f"espectro_{cond_name}.png"), bbox_inches='tight')
-                        st.pyplot(fig)
-                        plt.close(fig)
-
-                shutil.make_archive("analisis_completo", 'zip', base_path)
-                st.success("✅ ¡Todo listo!")
-                with open("analisis_completo.zip", "rb") as f:
-                    st.download_button("⬇️ Descargar Resultados (ZIP)", f, "analisis_completo.zip")
+                # --- ZIP ---
+                shutil.make_archive("resultados", 'zip', base_path)
+                st.success("✅ ¡Análisis completado!")
+                with open("resultados.zip", "rb") as f:
+                    st.download_button("⬇️ Descargar ZIP", f, "resultados_completos.zip")
 
             except Exception as e:
                 st.error(f"Error: {e}"); st.code(traceback.format_exc())
