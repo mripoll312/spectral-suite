@@ -26,6 +26,7 @@ hashlib.new = patched_new
 if 'file_cache' not in st.session_state:
     st.session_state.file_cache = {}
 
+# Parche de lectura (mantenido por seguridad)
 from pandas.io.parsers.readers import read_csv as _original_pandas_read_func
 def patched_read_csv(filepath_or_buffer, *args, **kwargs):
     if isinstance(filepath_or_buffer, str):
@@ -73,33 +74,55 @@ with tab2:
 
     if st.button("🚀 Iniciar Análisis"):
         if meta_file and ref_files and data_files:
-            st.session_state.file_cache = {'metadata.csv': meta_file.getvalue()}
-            for f in ref_files: st.session_state.file_cache[os.path.basename(f.name)] = f.getvalue()
-            for f in data_files: st.session_state.file_cache[os.path.basename(f.name)] = f.getvalue()
-
-            tmp_dir = "workspace"
+            # 1. Limpiar y preparar directorio temporal
+            tmp_dir = os.path.abspath("workspace") # Usar ruta absoluta
             if os.path.exists(tmp_dir): shutil.rmtree(tmp_dir)
             os.makedirs(os.path.join(tmp_dir, "csv_files"), exist_ok=True)
             os.makedirs(os.path.join(tmp_dir, "graphs"), exist_ok=True)
 
-            for f_name, f_content in st.session_state.file_cache.items():
-                with open(os.path.join(tmp_dir, f_name), "wb") as out: out.write(f_content)
+            # 2. Guardar físicamente los archivos en el disco (CRÍTICO)
+            # Guardamos metadata
+            with open(os.path.join(tmp_dir, "metadata.csv"), "wb") as f:
+                f.write(meta_file.getvalue())
+            
+            # Guardamos muestras y estándares
+            st.session_state.file_cache = {'metadata.csv': meta_file.getvalue()}
+            for f in ref_files:
+                fname = os.path.basename(f.name)
+                content = f.getvalue()
+                st.session_state.file_cache[fname] = content
+                with open(os.path.join(tmp_dir, fname), "wb") as out:
+                    out.write(content)
+            
+            for f in data_files:
+                fname = os.path.basename(f.name)
+                content = f.getvalue()
+                st.session_state.file_cache[fname] = content
+                with open(os.path.join(tmp_dir, fname), "wb") as out:
+                    out.write(content)
 
             try:
                 with st.spinner("Procesando datos..."):
                     old_cwd = os.getcwd()
-                    os.chdir(tmp_dir)
+                    os.chdir(tmp_dir) # Nos movemos a la carpeta donde están los archivos reales
+                    
                     sys.argv = ["data_toolbox.py", "-m", "metadata.csv"]
                     dt = Data()
                     dt.parse_args()
                     force_metadata_compatibility(dt)
-                    dt.read_data(); dt.sub_background(); dt.rearrange_data(); dt.group_data(); dt.conversion_rate()
+                    
+                    # El motor ahora encontrará los archivos en el disco local del servidor
+                    dt.read_data()
+                    dt.sub_background()
+                    dt.rearrange_data()
+                    dt.group_data()
+                    dt.conversion_rate()
+                    
                     meta_map = dt._meta_data.set_index('Unique_Sample_ID')[['Condition_Name', 'Time_Points']].to_dict('index')
                     os.chdir(old_cwd)
 
-                # --- BLOQUE 1: RATES (RECUPERADOS) ---
+                # --- BLOQUE 1: RATES ---
                 st.subheader("📉 Tasas de Conversión (Rates)")
-                
                 csv_rates = os.path.join(tmp_dir, "csv_files", "08_conv_rates.csv")
                 if os.path.exists(csv_rates):
                     df_r = pd.read_csv(csv_rates)
@@ -117,7 +140,6 @@ with tab2:
 
                 # --- BLOQUE 2: ESPECTROS MRP AGRUPADOS ---
                 st.subheader("📊 Evolución de Espectros")
-                
                 master_csv = os.path.join(tmp_dir, "csv_files", "00b_df_complete_background_subtracted_and_dropped.csv")
                 if os.path.exists(master_csv):
                     df_master = pd.read_csv(master_csv)
