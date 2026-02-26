@@ -7,30 +7,30 @@ import hashlib
 import traceback
 import io
 
-# --- 1. INTERCEPTOR DE MEMORIA (MONKEY PATCH) ---
+# --- 1. INTERCEPTOR DE MEMORIA (MONKEY PATCH) ANTI-RECURSIÓN ---
 uploaded_files_cache = {}
 
-# Guardamos la función REAL de pandas en una variable privada que nadie más toque
-from pandas.io.parsers.readers import read_csv as pandas_real_read_csv
+# CAPTURA ÚNICA: Guardamos la función original ANTES de cualquier parche
+if 'original_read_csv_frozen' not in st.session_state:
+    # Usamos la función de la librería base para asegurar limpieza
+    from pandas import read_csv as pandas_base_read
+    st.session_state.original_read_csv_frozen = pandas_base_read
 
 def patched_read_csv(filepath_or_buffer, *args, **kwargs):
-    # 1. Si es un string (una ruta de archivo)
+    # Si recibimos un string (ruta de archivo)
     if isinstance(filepath_or_buffer, str):
         filename = os.path.basename(filepath_or_buffer)
         
-        # 2. ¿Lo tenemos en la memoria (subido por el usuario)?
+        # Si el archivo está en nuestro diccionario de memoria
         if filename in uploaded_files_cache:
-            # st.write(f"DEBUG: Cargando desde memoria: {filename}") # Opcional para debug
-            return pandas_real_read_csv(io.BytesIO(uploaded_files_cache[filename]), *args, **kwargs)
-        
-        # 3. Si NO está en memoria, buscamos en el disco (solo para archivos internos del sistema)
-        # Pero usamos la función REAL para evitar la recursión infinita
-        return pandas_real_read_csv(filepath_or_buffer, *args, **kwargs)
+            # Creamos un nuevo stream de bytes
+            return st.session_state.original_read_csv_frozen(io.BytesIO(uploaded_files_cache[filename]), *args, **kwargs)
     
-    # 4. Si no es un string (es un buffer), usamos la función real directamente
-    return pandas_real_read_csv(filepath_or_buffer, *args, **kwargs)
+    # Si no está en memoria o no es un string, usamos la función CONGELADA
+    # Esto evita que la función se llame a sí misma infinitamente
+    return st.session_state.original_read_csv_frozen(filepath_or_buffer, *args, **kwargs)
 
-# Aplicamos el parche globalmente
+# Aplicamos el parche al namespace de pandas
 pd.read_csv = patched_read_csv
 
 # --- NUEVO: PARCHE DE COMPATIBILIDAD PANDAS 2.0 (DEPRECATED APPEND) ---
@@ -98,16 +98,25 @@ if st.button("🚀 Iniciar Análisis"):
         uploaded_files_cache[os.path.basename(meta_file.name)] = meta_bytes
         uploaded_files_cache['metadata.csv'] = meta_bytes
         
+        # Limpiar y llenar el Cache de Memoria
+        uploaded_files_cache.clear()
+        
+        # Metadata
+        meta_bytes = meta_file.getvalue()
+        uploaded_files_cache[os.path.basename(meta_file.name)] = meta_bytes
+        uploaded_files_cache['metadata.csv'] = meta_bytes
+        
+        # Referencias
         for f in ref_files:
-            content = f.getvalue()
-            uploaded_files_cache[f.name] = content
-            uploaded_files_cache[os.path.basename(f.name)] = content
+            f_content = f.getvalue()
+            # Guardamos con el nombre puro
+            uploaded_files_cache[os.path.basename(f.name)] = f_content
             
+        # Muestras
         for f in data_files:
-            content = f.getvalue()
-            uploaded_files_cache[f.name] = content
-            uploaded_files_cache[os.path.basename(f.name)] = content
-
+            f_content = f.getvalue()
+            uploaded_files_cache[os.path.basename(f.name)] = f_content
+            
         # Crear estructura física básica (el motor la necesita para existir)
         tmp_dir = "workspace"
         if os.path.exists(tmp_dir): shutil.rmtree(tmp_dir)
