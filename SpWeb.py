@@ -55,15 +55,15 @@ def force_metadata_compatibility(dt_instance):
 
 # --- 4. INTERFAZ ---
 st.set_page_config(page_title="Spectral Analysis Tool", layout="wide")
-st.title("🔬 Procesador Espectral")
+st.title("🔬 Spectral Analysis")
 
 col1, col2, col3 = st.columns(3)
 with col1:
     meta_file = st.file_uploader("1. Metadata (.csv)", type=["csv"])
 with col2:
-    ref_files = st.file_uploader("2. Estándares (.tsv)", type=["tsv", "csv"], accept_multiple_files=True)
+    ref_files = st.file_uploader("2. Muestras (.tsv)", type=["tsv"], accept_multiple_files=True)
 with col3:
-    data_files = st.file_uploader("3. Muestras (.csv)", type=["csv"], accept_multiple_files=True)
+    data_files = st.file_uploader("3. Estándares (.csv)", type=["csv"], accept_multiple_files=True)
 
 if st.button("🚀 Iniciar Análisis"):
     if meta_file and ref_files and data_files:
@@ -98,7 +98,7 @@ if st.button("🚀 Iniciar Análisis"):
 
         # D. EJECUCIÓN
         try:
-            with st.spinner("Ejecutando motor de Niels..."):
+            with st.spinner("Ejecutando motor..."):
                 old_cwd = os.getcwd()
                 os.chdir(tmp_dir)
                 
