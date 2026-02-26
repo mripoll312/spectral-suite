@@ -7,38 +7,28 @@ import hashlib
 import traceback
 import io
 
-# --- 1. INTERCEPTOR DE MEMORIA (PROTEGIDO CONTRA RECURSIÓN) ---
-uploaded_files_cache = {}
-
-# Esta es la clave: Importamos la función directamente de los internos de pandas
-# para que no use la del namespace 'pd' que vamos a parchar.
+# --- 1. INTERCEPTOR DE MEMORIA (PROTEGIDO) ---
 from pandas.io.parsers.readers import read_csv as _original_pandas_read_func
+
+if 'file_cache' not in st.session_state:
+    st.session_state.file_cache = {}
 
 def patched_read_csv(filepath_or_buffer, *args, **kwargs):
     if isinstance(filepath_or_buffer, str):
-        # 1. Limpiamos el nombre que pide el motor (quitamos rutas y espacios)
         requested_name = os.path.basename(filepath_or_buffer).strip()
+        if requested_name in st.session_state.file_cache:
+            return _original_pandas_read_func(io.BytesIO(st.session_state.file_cache[requested_name]), *args, **kwargs)
         
-        # 2. Intentamos encontrarlo en el caché (ignorando mayúsculas/minúsculas)
-        # Creamos un mapa de nombres limpios para comparar
-        clean_cache = {k.strip(): v for k, v in uploaded_files_cache.items()}
-        
-        if requested_name in clean_cache:
-            return _original_pandas_read_func(io.BytesIO(clean_cache[requested_name]), *args, **kwargs)
-            
-        # 3. Si aún no lo encuentra, intentamos una búsqueda parcial 
-        # (por si el motor añade extensiones o prefijos raros)
-        for cached_name, content in clean_cache.items():
-            if requested_name in cached_name or cached_name in requested_name:
+        # Búsqueda difusa (insensible a mayúsculas)
+        for cached_name, content in st.session_state.file_cache.items():
+            if requested_name.lower() == cached_name.lower():
                 return _original_pandas_read_func(io.BytesIO(content), *args, **kwargs)
 
-    # Si nada funciona, volvemos a la función original (evitando recursión)
     return _original_pandas_read_func(filepath_or_buffer, *args, **kwargs)
 
-# Aplicamos el parche al objeto pd que usará el motor de Niels
 pd.read_csv = patched_read_csv
 
-# --- RESTO DE PARCHES (Pandas 2.0 y Hashlib) ---
+# --- PARCHES DE COMPATIBILIDAD ---
 if not hasattr(pd.DataFrame, 'append'):
     pd.DataFrame.append = lambda self, other, ignore_index=True: pd.concat([self, other], ignore_index=ignore_index)
 
@@ -53,135 +43,90 @@ from data_toolbox import Data
 # --- 3. FUNCIÓN DE COMPATIBILIDAD DE METADATA ---
 def force_metadata_compatibility(dt_instance):
     df = dt_instance._meta_data
-    # Normalizar nombres de columnas que el motor pide de forma inconsistente
-    mapping = {
-        'Blank_Unique_Sample_ID': 'blank',
-        'Unique_Sample_ID': 'Unique_Sample_ID'
-    }
+    mapping = {'Blank_Unique_Sample_ID': 'blank', 'Unique_Sample_ID': 'Unique_Sample_ID'}
     df = df.rename(columns=mapping)
     df['unique_sample_id'] = df['Unique_Sample_ID']
     if 'blank' in df.columns:
         df['Blank_Unique_Sample_ID'] = df['blank']
     
-    # Limpiamos las rutas en todas las celdas para que coincidan con nuestro cache
     for col in df.columns:
         df[col] = df[col].apply(lambda x: os.path.basename(x) if isinstance(x, str) and (('/' in x) or ('\\' in x)) else x)
-    
     dt_instance._meta_data = df
 
-# --- 4. INTERFAZ DE USUARIO ---
+# --- 4. INTERFAZ ---
 st.set_page_config(page_title="Spectral Analysis Tool", layout="wide")
 st.title("🔬 Procesador Espectral")
-st.info("Este sistema intercepta las llamadas del motor original y le entrega los archivos directamente desde la memoria.")
 
 col1, col2, col3 = st.columns(3)
-
 with col1:
-    st.header("1. Metadata")
-    meta_file = st.file_uploader("Subir Metadata (.csv)", type=["csv"])
-
+    meta_file = st.file_uploader("1. Metadata (.csv)", type=["csv"])
 with col2:
-    st.header("2. Estándares y Refs")
-    ref_files = st.file_uploader("Subir .tsv", type=["tsv", "csv"], accept_multiple_files=True)
-
+    ref_files = st.file_uploader("2. Estándares (.tsv)", type=["tsv", "csv"], accept_multiple_files=True)
 with col3:
-    st.header("3. Datos de la Placa")
-    data_files = st.file_uploader("Subir .csv de MUESTRAS", type=["csv"], accept_multiple_files=True)
+    data_files = st.file_uploader("3. Muestras (.csv)", type=["csv"], accept_multiple_files=True)
 
-# --- 5. LÓGICA DE EJECUCIÓN ---
 if st.button("🚀 Iniciar Análisis"):
     if meta_file and ref_files and data_files:
-        # Limpiar y llenar el Cache de Memoria
-        uploaded_files_cache.clear()
-        
-        # Guardamos la metadata con su nombre original y como 'metadata.csv' (que pide el motor)
+        # A. PREPARAR CACHÉ
+        st.session_state.file_cache = {}
         meta_bytes = meta_file.getvalue()
-        uploaded_files_cache[os.path.basename(meta_file.name)] = meta_bytes
-        uploaded_files_cache['metadata.csv'] = meta_bytes
+        st.session_state.file_cache[os.path.basename(meta_file.name)] = meta_bytes
+        st.session_state.file_cache['metadata.csv'] = meta_bytes
         
-        # Limpiar y llenar el Cache de Memoria
-        uploaded_files_cache.clear()
-        
-        # Metadata
-        meta_bytes = meta_file.getvalue()
-        uploaded_files_cache[os.path.basename(meta_file.name)] = meta_bytes
-        uploaded_files_cache['metadata.csv'] = meta_bytes
-        
-        # Referencias
         for f in ref_files:
-            f_content = f.getvalue()
-            # Guardamos con el nombre puro
-            uploaded_files_cache[os.path.basename(f.name)] = f_content
-            
-        # Muestras
+            st.session_state.file_cache[os.path.basename(f.name)] = f.getvalue()
         for f in data_files:
-            f_content = f.getvalue()
-            uploaded_files_cache[os.path.basename(f.name)] = f_content
+            st.session_state.file_cache[os.path.basename(f.name)] = f.getvalue()
 
-        # Crear estructura física básica (el motor la necesita para existir)
+        # B. PREPARAR DIRECTORIOS (ANTES de escribir archivos)
         tmp_dir = "workspace"
         if os.path.exists(tmp_dir): shutil.rmtree(tmp_dir)
         os.makedirs(os.path.join(tmp_dir, "csv_files"), exist_ok=True)
-        
-        # Escribimos los archivos físicamente como respaldo
-        with open(os.path.join(tmp_dir, "metadata.csv"), "wb") as f: f.write(meta_bytes)
-        # Escribimos los archivos físicamente en la raíz del workspace como última opción
-        for f_name, f_content in uploaded_files_cache.items():
-            # Guardamos una copia en la raíz
-            with open(os.path.join(tmp_dir, f_name), "wb") as out:
+
+        # C. ESCRIBIR ARCHIVOS FÍSICOS (Usando el caché recién llenado)
+        for f_name, f_content in st.session_state.file_cache.items():
+            # Ruta base
+            path_raiz = os.path.join(tmp_dir, f_name)
+            with open(path_raiz, "wb") as out:
                 out.write(f_content)
-            # Y si es una muestra, también en csv_files
+            
+            # Si es una muestra, también va en csv_files
             if any(d.name == f_name for d in data_files):
-                with open(os.path.join(tmp_dir, "csv_files", f_name), "wb") as out:
+                path_data = os.path.join(tmp_dir, "csv_files", f_name)
+                with open(path_data, "wb") as out:
                     out.write(f_content)
 
+        # D. EJECUCIÓN
         try:
-            with st.spinner("El motor está procesando..."):
+            with st.spinner("Ejecutando motor de Niels..."):
                 old_cwd = os.getcwd()
                 os.chdir(tmp_dir)
                 
-                # Configurar argumentos de sistema para el motor
                 sys.argv = ["data_toolbox.py", "-m", "metadata.csv"]
-                
                 dt = Data()
                 dt.parse_args()
-                # INYECCIÓN DE COMPATIBILIDAD + FORZAR INCLUSIÓN
                 force_metadata_compatibility(dt)
-                # Forzamos a que todas las muestras sean procesadas
                 dt._meta_data['Include_In_Parameter_Estimation'] = 1 
                 
                 dt.read_data()
                 dt.sub_background()
                 dt.rearrange_data()
                 dt.group_data()
-                
-                # Ejecución del cálculo
                 dt.conversion_rate() 
                 
-                # --- NUEVA LÓGICA DE LOCALIZACIÓN DE ARCHIVOS ---
-                os.chdir(old_cwd) # Volvemos a la carpeta de la app
+                os.chdir(old_cwd)
                 
-                # --- LÓGICA DE DESCARGA ZIP (TODO EL CONTENIDO) ---
+                # ZIP y Descarga
                 zip_path = "resultados_analisis"
                 shutil.make_archive(zip_path, 'zip', tmp_dir)
-                
-                st.success("✅ ¡Procesamiento completado con éxito!")
+                st.success("✅ ¡Completado!")
                 
                 with open(f"{zip_path}.zip", "rb") as f:
-                    st.download_button(
-                        label="⬇️ Descargar Todos los Resultados (.ZIP)",
-                        data=f,
-                        file_name="analisis_completo.zip",
-                        mime="application/zip"
-                    )
-                
-                # Opcional: Mostrar lista de archivos generados para control
-                with st.expander("Ver lista de archivos generados"):
-                    st.write(os.listdir(tmp_dir) + os.listdir(os.path.join(tmp_dir, "csv_files")))
+                    st.download_button("⬇️ Descargar ZIP", f, "analisis.zip", "application/zip")
 
         except Exception as e:
             st.error(f"Error crítico: {e}")
             st.code(traceback.format_exc())
             if 'old_cwd' in locals(): os.chdir(old_cwd)
     else:
-        st.warning("Por favor, sube todos los archivos antes de continuar.")
+        st.warning("Faltan archivos.")
