@@ -9,15 +9,28 @@ import io
 
 # --- 1. INTERCEPTOR DE MEMORIA (MONKEY PATCH) ---
 uploaded_files_cache = {}
-original_read_csv = pd.read_csv
+
+# Guardamos la función REAL de pandas en una variable privada que nadie más toque
+from pandas.io.parsers.readers import read_csv as pandas_real_read_csv
 
 def patched_read_csv(filepath_or_buffer, *args, **kwargs):
+    # 1. Si es un string (una ruta de archivo)
     if isinstance(filepath_or_buffer, str):
         filename = os.path.basename(filepath_or_buffer)
+        
+        # 2. ¿Lo tenemos en la memoria (subido por el usuario)?
         if filename in uploaded_files_cache:
-            return original_read_csv(io.BytesIO(uploaded_files_cache[filename]), *args, **kwargs)
-    return original_read_csv(filepath_or_buffer, *args, **kwargs)
+            # st.write(f"DEBUG: Cargando desde memoria: {filename}") # Opcional para debug
+            return pandas_real_read_csv(io.BytesIO(uploaded_files_cache[filename]), *args, **kwargs)
+        
+        # 3. Si NO está en memoria, buscamos en el disco (solo para archivos internos del sistema)
+        # Pero usamos la función REAL para evitar la recursión infinita
+        return pandas_real_read_csv(filepath_or_buffer, *args, **kwargs)
+    
+    # 4. Si no es un string (es un buffer), usamos la función real directamente
+    return pandas_real_read_csv(filepath_or_buffer, *args, **kwargs)
 
+# Aplicamos el parche globalmente
 pd.read_csv = patched_read_csv
 
 # --- NUEVO: PARCHE DE COMPATIBILIDAD PANDAS 2.0 (DEPRECATED APPEND) ---
@@ -86,9 +99,14 @@ if st.button("🚀 Iniciar Análisis"):
         uploaded_files_cache['metadata.csv'] = meta_bytes
         
         for f in ref_files:
-            uploaded_files_cache[os.path.basename(f.name)] = f.getvalue()
+            content = f.getvalue()
+            uploaded_files_cache[f.name] = content
+            uploaded_files_cache[os.path.basename(f.name)] = content
+            
         for f in data_files:
-            uploaded_files_cache[os.path.basename(f.name)] = f.getvalue()
+            content = f.getvalue()
+            uploaded_files_cache[f.name] = content
+            uploaded_files_cache[os.path.basename(f.name)] = content
 
         # Crear estructura física básica (el motor la necesita para existir)
         tmp_dir = "workspace"
