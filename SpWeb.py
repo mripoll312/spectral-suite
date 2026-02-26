@@ -53,7 +53,7 @@ def force_metadata_compatibility(dt_instance):
 tab2, tab1 = st.tabs(["📊 Spectral Analysis", "🔄 Conversor Magellan"])
 
 # --- TAB 1: ANÁLISIS ESPECTRAL (CÓDIGO QUE YA FUNCIONA) ---
-with tab1:
+with tab2:
     st.header("🔬 Spectral Analysis")
     
     col1, col2, col3 = st.columns(3)
@@ -106,7 +106,7 @@ with tab1:
             st.warning("Carga todos los archivos.")
 
 # --- TAB 2: CONVERSOR MAGELLAN (EL CÓDIGO RECUPERADO) ---
-with tab2:
+with tab1:
     st.header("🔄 Convertidor Magellan a CSV")
     st.info("Sube el archivo .xlsx exportado de Magellan para convertirlo al formato que acepta el Analizador.")
     
@@ -135,4 +135,5 @@ with tab2:
             )
         except Exception as e:
             st.error(f"Error al convertir: {e}")
+
 
