@@ -50,7 +50,7 @@ def force_metadata_compatibility(dt_instance):
     dt_instance._meta_data = df
 
 # --- 2. DEFINICIÓN DE PESTAÑAS ---
-tab2, tab1 = st.tabs(["📊 Spectral Analysis", "🔄 Conversor Magellan"])
+tab1, tab2 = st.tabs(["🔄 Conversor Magellan", "📊 Spectral Analysis"])
 
 # --- TAB 1: ANÁLISIS ESPECTRAL (CÓDIGO QUE YA FUNCIONA) ---
 with tab2:
@@ -135,5 +135,6 @@ with tab1:
             )
         except Exception as e:
             st.error(f"Error al convertir: {e}")
+
 
 
