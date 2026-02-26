@@ -7,40 +7,36 @@ import hashlib
 import traceback
 import io
 
-# --- 1. INTERCEPTOR DE MEMORIA (MONKEY PATCH) ANTI-RECURSIÓN ---
+# --- 1. INTERCEPTOR DE MEMORIA (PROTEGIDO CONTRA RECURSIÓN) ---
 uploaded_files_cache = {}
 
-# CAPTURA ÚNICA: Guardamos la función original ANTES de cualquier parche
-if 'original_read_csv_frozen' not in st.session_state:
-    # Usamos la función de la librería base para asegurar limpieza
-    from pandas import read_csv as pandas_base_read
-    st.session_state.original_read_csv_frozen = pandas_base_read
+# Esta es la clave: Importamos la función directamente de los internos de pandas
+# para que no use la del namespace 'pd' que vamos a parchar.
+from pandas.io.parsers.readers import read_csv as _original_pandas_read_func
 
 def patched_read_csv(filepath_or_buffer, *args, **kwargs):
-    # Si recibimos un string (ruta de archivo)
+    # Si es un buffer de memoria (BytesIO), lo pasamos directo a la función real
+    if isinstance(filepath_or_buffer, io.BytesIO):
+        return _original_pandas_read_func(filepath_or_buffer, *args, **kwargs)
+
+    # Si es un string (ruta de archivo)
     if isinstance(filepath_or_buffer, str):
         filename = os.path.basename(filepath_or_buffer)
-        
-        # Si el archivo está en nuestro diccionario de memoria
         if filename in uploaded_files_cache:
-            # Creamos un nuevo stream de bytes
-            return st.session_state.original_read_csv_frozen(io.BytesIO(uploaded_files_cache[filename]), *args, **kwargs)
+            # st.info(f"Interceptor: Sirviendo {filename} desde caché.")
+            return _original_pandas_read_func(io.BytesIO(uploaded_files_cache[filename]), *args, **kwargs)
     
-    # Si no está en memoria o no es un string, usamos la función CONGELADA
-    # Esto evita que la función se llame a sí misma infinitamente
-    return st.session_state.original_read_csv_frozen(filepath_or_buffer, *args, **kwargs)
+    # Si no está en caché o es un objeto de Streamlit, usamos la función real
+    # PERO pasando el control a la función interna NO parchada
+    return _original_pandas_read_func(filepath_or_buffer, *args, **kwargs)
 
-# Aplicamos el parche al namespace de pandas
+# Aplicamos el parche al objeto pd que usará el motor de Niels
 pd.read_csv = patched_read_csv
 
-# --- NUEVO: PARCHE DE COMPATIBILIDAD PANDAS 2.0 (DEPRECATED APPEND) ---
-# El motor de Niels usa .append() que ya no existe en Pandas moderno.
-# Lo re-inyectamos usando ._append interno para que el motor no falle.
+# --- RESTO DE PARCHES (Pandas 2.0 y Hashlib) ---
 if not hasattr(pd.DataFrame, 'append'):
     pd.DataFrame.append = lambda self, other, ignore_index=True: pd.concat([self, other], ignore_index=ignore_index)
-# ---------------------------------------------------------------------
 
-# --- 2. PARCHE hashlib ---
 original_new = hashlib.new
 def patched_new(name, data=b'', **kwargs):
     kwargs.pop('digest_size', None)
@@ -70,7 +66,7 @@ def force_metadata_compatibility(dt_instance):
 
 # --- 4. INTERFAZ DE USUARIO ---
 st.set_page_config(page_title="Spectral Analysis Tool", layout="wide")
-st.title("🔬 Procesador Espectral (Modo Interceptor)")
+st.title("🔬 Procesador Espectral")
 st.info("Este sistema intercepta las llamadas del motor original y le entrega los archivos directamente desde la memoria.")
 
 col1, col2, col3 = st.columns(3)
@@ -80,8 +76,8 @@ with col1:
     meta_file = st.file_uploader("Subir Metadata (.csv)", type=["csv"])
 
 with col2:
-    st.header("2. Estándares y Referencias")
-    ref_files = st.file_uploader("Subir .tsv y .csv de REFERENCIA", type=["tsv", "csv"], accept_multiple_files=True)
+    st.header("2. Estándares y Refs")
+    ref_files = st.file_uploader("Subir .tsv", type=["tsv", "csv"], accept_multiple_files=True)
 
 with col3:
     st.header("3. Datos de la Placa")
@@ -116,7 +112,7 @@ if st.button("🚀 Iniciar Análisis"):
         for f in data_files:
             f_content = f.getvalue()
             uploaded_files_cache[os.path.basename(f.name)] = f_content
-            
+
         # Crear estructura física básica (el motor la necesita para existir)
         tmp_dir = "workspace"
         if os.path.exists(tmp_dir): shutil.rmtree(tmp_dir)
