@@ -15,19 +15,24 @@ uploaded_files_cache = {}
 from pandas.io.parsers.readers import read_csv as _original_pandas_read_func
 
 def patched_read_csv(filepath_or_buffer, *args, **kwargs):
-    # Si es un buffer de memoria (BytesIO), lo pasamos directo a la función real
-    if isinstance(filepath_or_buffer, io.BytesIO):
-        return _original_pandas_read_func(filepath_or_buffer, *args, **kwargs)
-
-    # Si es un string (ruta de archivo)
     if isinstance(filepath_or_buffer, str):
-        filename = os.path.basename(filepath_or_buffer)
-        if filename in uploaded_files_cache:
-            # st.info(f"Interceptor: Sirviendo {filename} desde caché.")
-            return _original_pandas_read_func(io.BytesIO(uploaded_files_cache[filename]), *args, **kwargs)
-    
-    # Si no está en caché o es un objeto de Streamlit, usamos la función real
-    # PERO pasando el control a la función interna NO parchada
+        # 1. Limpiamos el nombre que pide el motor (quitamos rutas y espacios)
+        requested_name = os.path.basename(filepath_or_buffer).strip()
+        
+        # 2. Intentamos encontrarlo en el caché (ignorando mayúsculas/minúsculas)
+        # Creamos un mapa de nombres limpios para comparar
+        clean_cache = {k.strip(): v for k, v in uploaded_files_cache.items()}
+        
+        if requested_name in clean_cache:
+            return _original_pandas_read_func(io.BytesIO(clean_cache[requested_name]), *args, **kwargs)
+            
+        # 3. Si aún no lo encuentra, intentamos una búsqueda parcial 
+        # (por si el motor añade extensiones o prefijos raros)
+        for cached_name, content in clean_cache.items():
+            if requested_name in cached_name or cached_name in requested_name:
+                return _original_pandas_read_func(io.BytesIO(content), *args, **kwargs)
+
+    # Si nada funciona, volvemos a la función original (evitando recursión)
     return _original_pandas_read_func(filepath_or_buffer, *args, **kwargs)
 
 # Aplicamos el parche al objeto pd que usará el motor de Niels
@@ -120,11 +125,15 @@ if st.button("🚀 Iniciar Análisis"):
         
         # Escribimos los archivos físicamente como respaldo
         with open(os.path.join(tmp_dir, "metadata.csv"), "wb") as f: f.write(meta_bytes)
+        # Escribimos los archivos físicamente en la raíz del workspace como última opción
         for f_name, f_content in uploaded_files_cache.items():
-            if f_name != 'metadata.csv':
-                # Si es un dato de placa, va en csv_files
-                path = os.path.join(tmp_dir, "csv_files", f_name) if any(d.name == f_name for d in data_files) else os.path.join(tmp_dir, f_name)
-                with open(path, "wb") as out: out.write(f_content)
+            # Guardamos una copia en la raíz
+            with open(os.path.join(tmp_dir, f_name), "wb") as out:
+                out.write(f_content)
+            # Y si es una muestra, también en csv_files
+            if any(d.name == f_name for d in data_files):
+                with open(os.path.join(tmp_dir, "csv_files", f_name), "wb") as out:
+                    out.write(f_content)
 
         try:
             with st.spinner("El motor está procesando..."):
