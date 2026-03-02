@@ -54,11 +54,64 @@ st.title("🔬 Spectral Analysis Suite")
 tab1, tab2 = st.tabs(["🔄 Magellan Convert", "📊 Spectral Analysis"])
 
 with tab1:
+    st.info("Convertidor Magellan: Transpone datos horizontales a formato vertical .tsv compatible.")
     uploaded_xlsx = st.file_uploader("Upload Magellan (.xlsx)", type=["xlsx"])
+    
     if uploaded_xlsx:
-        df_mag = pd.read_excel(uploaded_xlsx)
-        csv_buf = io.StringIO(); df_mag.to_csv(csv_buf, index=False)
-        st.download_button("⬇️ Descargar CSV", csv_buf.getvalue(), f"conv_{uploaded_xlsx.name}.csv")
+        try:
+            # 1. Leer el Excel
+            df_mag = pd.read_excel(uploaded_xlsx)
+            
+            # Limpieza: Si la primera columna se llama '*' o similar, la usamos como índice
+            # Esto es típico en los archivos de Magellan que enviaste
+            first_col = df_mag.columns[0]
+            df_mag = df_mag.set_index(first_col)
+            
+            # 2. TRANSPOSICIÓN: Convertimos filas (pozos) en columnas y columnas (Wavelength) en filas
+            df_transposed = df_mag.T
+            df_transposed.index.name = 'Wavelength'
+            df_transposed = df_transposed.reset_index()
+            
+            # Aseguramos que Wavelength sea numérico
+            df_transposed['Wavelength'] = pd.to_numeric(df_transposed['Wavelength'], errors='coerce')
+            df_transposed = df_transposed.dropna(subset=['Wavelength'])
+
+            # 3. Crear la estructura completa de 96 pozos (A1 -> H12)
+            filas = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
+            columnas_placa = [f"{f}{c}" for f in filas for c in range(1, 13)]
+            
+            # Crear DataFrame final con Wavelength primero
+            df_final = pd.DataFrame(columns=['Wavelength'] + columnas_placa)
+            df_final['Wavelength'] = df_transposed['Wavelength']
+            
+            # 4. Mapear datos originales a sus posiciones en la placa
+            for col in df_transposed.columns:
+                if col in columnas_placa:
+                    df_final[col] = df_transposed[col]
+            
+            # 5. Generar el TSV fiel al original
+            # Usamos float_format para no perder decimales
+            tsv_buf = io.StringIO()
+            df_final.to_csv(tsv_buf, sep='\t', index=False, decimal='.', float_format='%.18f')
+            
+            output_filename = f"conv_{uploaded_xlsx.name.replace('.xlsx', '')}.tsv"
+            
+            st.success(f"✅ Conversión exitosa. Se detectaron los pozos: {', '.join([c for c in df_transposed.columns if c in columnas_placa])}")
+            
+            st.download_button(
+                label="⬇️ Descargar TSV para Análisis",
+                data=tsv_buf.getvalue(),
+                file_name=output_filename,
+                mime="text/tab-separated-values"
+            )
+            
+            # Previsualización para verificar que los datos están ahí
+            st.subheader("Vista previa de datos convertidos")
+            st.dataframe(df_final.head())
+
+        except Exception as e:
+            st.error(f"Error al procesar el Excel: {e}")
+            st.code(traceback.format_exc())
 
 with tab2:
     col_a, col_b, col_c = st.columns(3)
@@ -165,3 +218,4 @@ with tab2:
         st.divider()
         with open("analisis_v1.9.zip", "rb") as f:
             st.download_button("⬇️ Download as Zip", f, "completeAnalysis.zip")
+
