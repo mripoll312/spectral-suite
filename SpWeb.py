@@ -63,11 +63,10 @@ with tab1:
             df_mag = pd.read_excel(uploaded_xlsx)
             
             # Limpieza: Si la primera columna se llama '*' o similar, la usamos como índice
-            # Esto es típico en los archivos de Magellan que enviaste
             first_col = df_mag.columns[0]
             df_mag = df_mag.set_index(first_col)
             
-            # 2. TRANSPOSICIÓN: Convertimos filas (pozos) en columnas y columnas (Wavelength) en filas
+            # 2. TRANSPOSICIÓN
             df_transposed = df_mag.T
             df_transposed.index.name = 'Wavelength'
             df_transposed = df_transposed.reset_index()
@@ -90,7 +89,6 @@ with tab1:
                     df_final[col] = df_transposed[col]
             
             # 5. Generar el TSV fiel al original
-            # Usamos float_format para no perder decimales
             tsv_buf = io.StringIO()
             df_final.to_csv(tsv_buf, sep='\t', index=False, decimal='.', float_format='%.18f')
             
@@ -105,7 +103,6 @@ with tab1:
                 mime="text/tab-separated-values"
             )
             
-            # Previsualización para verificar que los datos están ahí
             st.subheader("Vista previa de datos convertidos")
             st.dataframe(df_final.head())
 
@@ -133,7 +130,20 @@ with tab2:
                 up_names.append(fn)
                 with open(os.path.join(base_path, fn), "wb") as out: out.write(f.getvalue())
 
-            with open(os.path.join(base_path, "metadata.csv"), "wb") as f: f.write(meta_file.getvalue())
+            # --- CAMBIO REALIZADO AQUÍ: LIMPIEZA DE METADATA ANTES DE GUARDAR ---
+            try:
+                # Leemos la metadata cargada
+                df_meta_clean = pd.read_csv(io.BytesIO(meta_file.getvalue()))
+                # Eliminamos filas que sean totalmente nulas o que no tengan nombre de condición
+                df_meta_clean = df_meta_clean.dropna(how='all')
+                if 'Condition_Name' in df_meta_clean.columns:
+                    df_meta_clean = df_meta_clean.dropna(subset=['Condition_Name'])
+                
+                # Guardamos la versión limpia en el disco para el motor Data()
+                df_meta_clean.to_csv(os.path.join(base_path, "metadata.csv"), index=False)
+            except Exception as e:
+                st.error(f"Error limpiando el archivo de Metadata: {e}")
+                with open(os.path.join(base_path, "metadata.csv"), "wb") as f: f.write(meta_file.getvalue())
 
             try:
                 with st.spinner("Processing and generating graphics..."):
@@ -142,13 +152,12 @@ with tab2:
                     dt = Data(); dt.parse_args()
                     force_metadata_compatibility(dt, up_names)
                     dt.read_data(); dt.sub_background(); dt.rearrange_data(); dt.group_data(); dt.conversion_rate()
-                    # Mapeo para espectros
+                    
                     df_meta = dt._meta_data.copy()
                     m_map = df_meta.set_index('Unique_Sample_ID')[['Condition_Name', 'Time_Points']].to_dict('index')
                     os.chdir(old_cwd)
 
-                # --- GENERACIÓN DE IMÁGENES (KINETIC & SPECTRUM) ---
-                # 1. Kinetic (%)
+                # --- GENERACIÓN DE IMÁGENES ---
                 rates_csv = os.path.join(csv_dir, "08_conv_rates.csv")
                 if os.path.exists(rates_csv):
                     df_rates = pd.read_csv(rates_csv, index_col=0)
@@ -160,7 +169,6 @@ with tab2:
                         ax.set_title(f"Kinetic: {cond}"); ax.set_ylabel("Conversion (%)"); ax.set_ylim(-5, 105); ax.legend(); ax.grid(True, alpha=0.3)
                         fig.savefig(os.path.join(graphs_dir, f"kinetic_{cond}.png"), bbox_inches='tight'); plt.close(fig)
 
-                # 2. Espectros
                 master_csv = os.path.join(csv_dir, "00b_df_complete_background_subtracted_and_dropped.csv")
                 if os.path.exists(master_csv):
                     df_m = pd.read_csv(master_csv); wv = df_m.iloc[:, 0]
@@ -185,32 +193,23 @@ with tab2:
                 st.error(f"Error: {e}"); st.code(traceback.format_exc())
                 if 'old_cwd' in locals(): os.chdir(old_cwd)
 
-    # --- SECCIÓN DEL CARRUSEL ---
     if st.session_state.analysis_ready:
         st.divider()
         st.subheader("Results")
-        
-        # Obtener lista de imágenes generadas (incluyendo las fit_ que genera el motor)
         img_list = sorted(glob.glob("workspace/graphs/*.png"))
         
         if img_list:
             total_imgs = len(img_list)
-            
-            # Controles del carrusel
             c1, c2, c3 = st.columns([1, 3, 1])
-            
             with c1:
                 if st.button("⬅️ Previous"):
                     st.session_state.img_idx = (st.session_state.img_idx - 1) % total_imgs
-            
             with c3:
                 if st.button("Next ➡️"):
                     st.session_state.img_idx = (st.session_state.img_idx + 1) % total_imgs
             
-            # Mostrar imagen actual
             current_img_path = img_list[st.session_state.img_idx]
             file_name = os.path.basename(current_img_path)
-            
             with c2:
                 st.markdown(f"<p style='text-align: center;'><b>Archivo {st.session_state.img_idx + 1} de {total_imgs}:</b> {file_name}</p>", unsafe_allow_html=True)
                 st.image(current_img_path, use_container_width=True)
@@ -218,4 +217,3 @@ with tab2:
         st.divider()
         with open("analisis_v1.9.zip", "rb") as f:
             st.download_button("⬇️ Download as Zip", f, "completeAnalysis.zip")
-
