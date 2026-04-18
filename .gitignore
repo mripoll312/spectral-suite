@@ -1,0 +1,34 @@
+__pycache__/data_toolbox.cpython-313.pyc
+analisis_v1.9.zip
+workspace/conv_20260414-ac1.tsv
+workspace/conv_20260414-blanco.tsv
+workspace/csv_files/00_df_complete.csv
+workspace/csv_files/00b_df_complete_background_subtracted_and_dropped.csv
+workspace/csv_files/01_rearranged_data.csv
+workspace/csv_files/03_df_mean.csv
+workspace/csv_files/04_df_std.csv
+workspace/csv_files/08_conv_rates.csv
+workspace/graphs/fit_cond_1_t_0.0.png
+workspace/graphs/fit_cond_2_t_5.0.png
+workspace/graphs/fit_cond_3_t_10.0.png
+workspace/graphs/fit_cond_4_t_15.0.png
+workspace/graphs/fit_cond_5_t_20.0.png
+workspace/graphs/fit_cond_6_t_30.0.png
+workspace/graphs/fit_cond_7_t_45.0.png
+workspace/graphs/kinetic_ACT1_0min.png
+workspace/graphs/kinetic_ACT1_10min.png
+workspace/graphs/kinetic_ACT1_15min.png
+workspace/graphs/kinetic_ACT1_20min.png
+workspace/graphs/kinetic_ACT1_30min.png
+workspace/graphs/kinetic_ACT1_45min .png
+workspace/graphs/kinetic_ACT1_5min.png
+workspace/graphs/spectrum_ACT1_0min.png
+workspace/graphs/spectrum_ACT1_10min.png
+workspace/graphs/spectrum_ACT1_15min.png
+workspace/graphs/spectrum_ACT1_20min.png
+workspace/graphs/spectrum_ACT1_30min.png
+workspace/graphs/spectrum_ACT1_45min .png
+workspace/graphs/spectrum_ACT1_5min.png
+workspace/metadata.csv
+workspace/Uracil_in_100mM_NaOH_full_spectrum_2_mM_30+470uL_sample.csv
+workspace/Uridine_in_100mM_NaOH_full_spectrum_1_mM_60+440uL_sample.csv
