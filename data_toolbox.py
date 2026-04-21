@@ -765,9 +765,6 @@ class Data:
         logger.info("Reading df_mean and df_std ...")
         self.df_mean = pd.read_csv("./csv_files/03_df_mean.csv")
         self.df_std  = pd.read_csv("./csv_files/04_df_std.csv")
-        # Ensure all numeric columns are float to avoid dtype conflicts in Streamlit
-        self.df_mean = self.df_mean.astype({col: float for col in self.df_mean.columns if col != "Unique_Sample_ID" and col != "Condition_Name" and col != "Description" and col != "Time_Point"})
-        self.df_std = self.df_std.astype({col: float for col in self.df_std.columns if col != "Unique_Sample_ID" and col != "Condition_Name" and col != "Description" and col != "Time_Point"})
         logger.info("... done.")
 
         logger.info("Starting calculation of the conversion rate...")
@@ -979,9 +976,6 @@ class Data:
         logger.info("Reading df_mean and df_std ...")
         self.df_mean = pd.read_csv("./csv_files/03_df_mean.csv")
         self.df_std  = pd.read_csv("./csv_files/04_df_std.csv")
-        # Ensure all numeric columns are float to avoid dtype conflicts in Streamlit
-        self.df_mean = self.df_mean.astype({col: float for col in self.df_mean.columns if col != "Unique_Sample_ID" and col != "Condition_Name" and col != "Description" and col != "Time_Point"})
-        self.df_std = self.df_std.astype({col: float for col in self.df_std.columns if col != "Unique_Sample_ID" and col != "Condition_Name" and col != "Description" and col != "Time_Point"})
         logger.info("... done.")
 
         logger.info("Starting calculation of the conversion rate...")
