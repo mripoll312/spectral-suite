@@ -50,7 +50,7 @@ def force_metadata_compatibility(dt_instance, uploaded_filenames):
 from data_toolbox import Data
 
 # --- 3. INTERFAZ ---
-st.title("🔬 Spectral Analysis Suite 2.0")
+st.title("🔬 Spectral Analysis Suite")
 tab1, tab2 = st.tabs(["🔄 Magellan Convert", "📊 Spectral Analysis"])
 
 with tab1:
@@ -59,36 +59,27 @@ with tab1:
     
     if uploaded_xlsx:
         try:
-            # 1. Leer el Excel
             df_mag = pd.read_excel(uploaded_xlsx)
-            
-            # Limpieza: Si la primera columna se llama '*' o similar, la usamos como índice
             first_col = df_mag.columns[0]
             df_mag = df_mag.set_index(first_col)
             
-            # 2. TRANSPOSICIÓN
             df_transposed = df_mag.T
             df_transposed.index.name = 'Wavelength'
             df_transposed = df_transposed.reset_index()
             
-            # Aseguramos que Wavelength sea numérico
             df_transposed['Wavelength'] = pd.to_numeric(df_transposed['Wavelength'], errors='coerce')
             df_transposed = df_transposed.dropna(subset=['Wavelength'])
 
-            # 3. Crear la estructura completa de 96 pozos (A1 -> H12)
             filas = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
             columnas_placa = [f"{f}{c}" for f in filas for c in range(1, 13)]
             
-            # Crear DataFrame final con Wavelength primero
             df_final = pd.DataFrame(columns=['Wavelength'] + columnas_placa)
             df_final['Wavelength'] = df_transposed['Wavelength']
             
-            # 4. Mapear datos originales a sus posiciones en la placa
             for col in df_transposed.columns:
                 if col in columnas_placa:
                     df_final[col] = df_transposed[col]
             
-            # 5. Generar el TSV fiel al original
             tsv_buf = io.StringIO()
             df_final.to_csv(tsv_buf, sep='\t', index=False, decimal='.', float_format='%.18f')
             
@@ -120,7 +111,11 @@ with tab2:
         if meta_file and ref_files and data_files:
             base_path = os.path.abspath("workspace")
             if os.path.exists(base_path): shutil.rmtree(base_path)
-            graphs_dir = os.path.join(base_path, "graphs"); os.makedirs(graphs_dir, exist_ok=True)
+            
+            # --- CORRECCIÓN 1: Unificamos a 'Graphs' (mayúscula) para evitar problemas en Linux ---
+            graphs_dir = os.path.join(base_path, "Graphs")
+            os.makedirs(graphs_dir, exist_ok=True)
+            
             csv_dir = os.path.join(base_path, "csv_files"); os.makedirs(csv_dir, exist_ok=True)
 
             up_names = []
@@ -130,16 +125,12 @@ with tab2:
                 up_names.append(fn)
                 with open(os.path.join(base_path, fn), "wb") as out: out.write(f.getvalue())
 
-            # --- CAMBIO REALIZADO AQUÍ: LIMPIEZA DE METADATA ANTES DE GUARDAR ---
             try:
-                # Leemos la metadata cargada
                 df_meta_clean = pd.read_csv(io.BytesIO(meta_file.getvalue()))
-                # Eliminamos filas que sean totalmente nulas o que no tengan nombre de condición
                 df_meta_clean = df_meta_clean.dropna(how='all')
                 if 'Condition_Name' in df_meta_clean.columns:
                     df_meta_clean = df_meta_clean.dropna(subset=['Condition_Name'])
                 
-                # Guardamos la versión limpia en el disco para el motor Data()
                 df_meta_clean.to_csv(os.path.join(base_path, "metadata.csv"), index=False)
             except Exception as e:
                 st.error(f"Error limpiando el archivo de Metadata: {e}")
@@ -157,7 +148,6 @@ with tab2:
                     m_map = df_meta.set_index('Unique_Sample_ID')[['Condition_Name', 'Time_Points']].to_dict('index')
                     os.chdir(old_cwd)
 
-                # --- GENERACIÓN DE IMÁGENES ---
                 rates_csv = os.path.join(csv_dir, "08_conv_rates.csv")
                 if os.path.exists(rates_csv):
                     df_rates = pd.read_csv(rates_csv, index_col=0)
@@ -191,12 +181,15 @@ with tab2:
 
             except Exception as e:
                 st.error(f"Error: {e}"); st.code(traceback.format_exc())
-                if 'old_cwd' in locals(): os.chdir(old_cwd)
+                if 'old_cwd' in locals() and os.getcwd() != old_cwd: os.chdir(old_cwd)
 
     if st.session_state.analysis_ready:
         st.divider()
         st.subheader("Results")
-        img_list = sorted(glob.glob("workspace/graphs/*.png"))
+        
+        # --- CORRECCIÓN 2: Búsqueda recursiva de cualquier PNG dentro del workspace ---
+        # Esto captura imágenes hechas por tu código Y por data_toolbox.py
+        img_list = sorted(glob.glob("workspace/**/*.png", recursive=True))
         
         if img_list:
             total_imgs = len(img_list)
@@ -208,12 +201,18 @@ with tab2:
                 if st.button("Next ➡️"):
                     st.session_state.img_idx = (st.session_state.img_idx + 1) % total_imgs
             
+            # Protección por si cambia la cantidad de imágenes
+            if st.session_state.img_idx >= total_imgs: st.session_state.img_idx = 0
+            
             current_img_path = img_list[st.session_state.img_idx]
             file_name = os.path.basename(current_img_path)
             with c2:
                 st.markdown(f"<p style='text-align: center;'><b>Archivo {st.session_state.img_idx + 1} de {total_imgs}:</b> {file_name}</p>", unsafe_allow_html=True)
                 st.image(current_img_path, use_container_width=True)
+        else:
+            st.warning("El análisis finalizó, pero no se encontraron imágenes (.png) generadas en el workspace.")
         
         st.divider()
-        with open("analisis_v1.9.zip", "rb") as f:
-            st.download_button("⬇️ Download as Zip", f, "completeAnalysis.zip")
+        if os.path.exists("analisis_v1.9.zip"):
+            with open("analisis_v1.9.zip", "rb") as f:
+                st.download_button("⬇️ Download as Zip", f, "completeAnalysis.zip")
