@@ -1077,13 +1077,13 @@ class Data:
 
                 standard_deviations = self.df_std.query(
                     f"Condition_Name == '{condition_name}' & Time_Point == {timepoint} & Wavelength >= {fit_from_wavelength} & Wavelength "
-                    f"<= {fit_to_wavelength}")[["Wavelength", "Abs"]].astype(float)
+                    f"<= {fit_to_wavelength}")[["Wavelength", "Abs"]]
                 for idx in standard_deviations.index:
                     if standard_deviations["Abs"].loc[idx] == 0:
-                        standard_deviations.at[idx, "Abs"] = np.finfo(float).eps
+                        standard_deviations.at[idx, "Abs"] = float(np.finfo(float).eps)
                     else:
                         if isosbestic_point_wavelength > 0:
-                            standard_deviations.at[idx, "Abs"] = standard_deviations["Abs"].loc[idx] / curve_to_fit.loc[isosbestic_point_wavelength]["Abs"]
+                            standard_deviations.at[idx, "Abs"] = float(standard_deviations["Abs"].loc[idx] / curve_to_fit.loc[isosbestic_point_wavelength]["Abs"])
 
                 logger.debug(curve_to_fit)
 
