@@ -528,8 +528,8 @@ class Data:
             current_row_vals = self._meta_data[self._meta_data["Unique_Sample_ID"] == unique_sample_id]
 
             # Create tmp data frame
-            wavelength_start = float(current_row_vals["Wavelength_Start"].iloc[0])
-            wavelength_end   = float(current_row_vals["Wavelength_End"].iloc[0])
+            wavelength_start = float(current_row_vals["Wavelength_Start"])
+            wavelength_end   = float(current_row_vals["Wavelength_End"])
             #number_of_wavelength_entries = len(np.arange(wavelength_start, wavelength_end + 1., 1))
             tmp_df = pd.DataFrame(columns=self._meta_data.columns)
 
