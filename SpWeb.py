@@ -150,15 +150,40 @@ with tab2:
 
                 rates_csv = os.path.join(csv_dir, "08_conv_rates.csv")
                 if os.path.exists(rates_csv):
+                    import re
                     df_rates = pd.read_csv(rates_csv, index_col=0)
-                    for cond, group in df_rates.groupby('Condition_Name'):
+                    
+                    # Función inteligente mejorada para limpiar espacios fantasma
+                    def clean_cond_name(name):
+                        # 1. Quitamos espacios en blanco al principio y al final (.strip)
+                        nombre_limpio = str(name).strip()
+                        # 2. Quitamos el tiempo con una regla más flexible (tolera "mins" y espacios)
+                        return re.sub(r'[_ ]?[0-9]+(\.[0-9]+)?\s*(min|m|mins)?$', '', nombre_limpio, flags=re.IGNORECASE)
+                    
+                    # Creamos una columna base limpia
+                    df_rates['Base_Condition'] = df_rates['Condition_Name'].apply(clean_cond_name)
+                    
+                    # Ahora agrupamos por esta base limpia
+                    for cond, group in df_rates.groupby('Base_Condition'):
                         group = group.sort_values(by='Time_Point')
+                        
                         fig, ax = plt.subplots(figsize=(8, 5))
-                        ax.plot(group['Time_Point'], group['Substrate']*100, 'o-', label='Substrate', color='#1f77b4')
-                        ax.plot(group['Time_Point'], group['Product']*100, 's-', label='Product', color='#ff7f0e')
-                        ax.set_title(f"Kinetic: {cond}"); ax.set_ylabel("Conversion (%)"); ax.set_ylim(-5, 105); ax.legend(); ax.grid(True, alpha=0.3)
-                        fig.savefig(os.path.join(graphs_dir, f"kinetic_{cond}.png"), bbox_inches='tight'); plt.close(fig)
-
+                        
+                        ax.plot(group['Time_Point'], group['Substrate']*100, marker='o', linestyle='-', label='Substrate', color='#1f77b4', linewidth=2.5, markersize=8)
+                        ax.plot(group['Time_Point'], group['Product']*100, marker='s', linestyle='-', label='Product', color='#ff7f0e', linewidth=2.5, markersize=8)
+                        
+                        ax.set_title(f"Kinetic: {cond}", fontsize=14, fontweight='bold')
+                        ax.set_xlabel("Time", fontsize=12)
+                        ax.set_ylabel("Conversion (%)", fontsize=12)
+                        ax.set_ylim(-5, 105)
+                        
+                        # Setear las marcas del eje X
+                        ax.set_xticks(group['Time_Point'])
+                        
+                        ax.legend()
+                        ax.grid(True, alpha=0.3)
+                        fig.savefig(os.path.join(graphs_dir, f"kinetic_{cond}.png"), bbox_inches='tight')
+                        plt.close(fig)
                 master_csv = os.path.join(csv_dir, "00b_df_complete_background_subtracted_and_dropped.csv")
                 if os.path.exists(master_csv):
                     df_m = pd.read_csv(master_csv); wv = df_m.iloc[:, 0]
