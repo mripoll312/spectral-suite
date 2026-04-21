@@ -50,7 +50,7 @@ def force_metadata_compatibility(dt_instance, uploaded_filenames):
 from data_toolbox import Data
 
 # --- 3. INTERFAZ ---
-st.title("🔬 Spectral Analysis Suite 2.0")
+st.title("🔬 Spectral Analysis Suite")
 tab1, tab2 = st.tabs(["🔄 Magellan Convert", "📊 Spectral Analysis"])
 
 with tab1:
